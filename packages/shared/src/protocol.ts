@@ -44,5 +44,5 @@ export function parseEnvelope<
   raw: unknown
 ): MessageEnvelope<TType, z.infer<TPayloadSchema>> {
   const schema = createEnvelopeSchema(type, payloadSchema);
-  return schema.parse(raw);
+  return schema.parse(raw) as MessageEnvelope<TType, z.infer<TPayloadSchema>>;
 }

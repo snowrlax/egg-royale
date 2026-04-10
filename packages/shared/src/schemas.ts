@@ -98,6 +98,21 @@ export const roomDeltaSchema = z.object({
   removedFishIds: z.array(z.string()),
 });
 
+// ── Join Result ──
+
+export const joinResultSchema = z.object({
+  roomId: roomIdSchema,
+  roomCode: roomCodeSchema,
+  playerId: playerIdSchema,
+  snapshot: gameSnapshotSchema,
+});
+
+// ── Player Left ──
+
+export const playerLeftPayloadSchema = z.object({
+  playerId: playerIdSchema,
+});
+
 // ── Protocol Error ──
 
 export const protocolErrorCodeSchema = z.enum([

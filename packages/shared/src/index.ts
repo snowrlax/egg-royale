@@ -26,6 +26,8 @@ export {
   fishStateSchema,
   gameSnapshotSchema,
   roomDeltaSchema,
+  joinResultSchema,
+  playerLeftPayloadSchema,
   protocolErrorCodeSchema,
   protocolErrorSchema,
 } from "./schemas.js";

@@ -32,8 +32,26 @@ export function createGameLoop(): GameLoop {
     .setRestitution(FLOP.GROUND_RESTITUTION);
   world.createCollider(groundDesc);
 
+  // Edge walls
+  const wallHeight = 1.5;
+  const wallThick = 0.15;
+  const size = 10;
+  const walls = [
+    { hx: size, hy: wallHeight, hz: wallThick, tx: 0, tz: size },
+    { hx: size, hy: wallHeight, hz: wallThick, tx: 0, tz: -size },
+    { hx: wallThick, hy: wallHeight, hz: size, tx: size, tz: 0 },
+    { hx: wallThick, hy: wallHeight, hz: size, tx: -size, tz: 0 },
+  ];
+  for (const w of walls) {
+    const wallDesc = RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
+      .setTranslation(w.tx, wallHeight, w.tz)
+      .setRestitution(0.5);
+    world.createCollider(wallDesc);
+  }
+
   const fishMap = new Map<string, ServerFish>();
   const inputQueue = new Map<string, PlayerInput[]>();
+  const pendingRemovals: string[] = [];
   let tick = 0;
   let spawnIndex = 0;
 
@@ -53,6 +71,7 @@ export function createGameLoop(): GameLoop {
       fish.dispose(world);
       fishMap.delete(playerId);
       inputQueue.delete(playerId);
+      pendingRemovals.push(playerId);
     },
 
     enqueueInput(playerId, input) {
@@ -88,13 +107,14 @@ export function createGameLoop(): GameLoop {
 
       // Build delta (for now, always send all fish — optimize later with dirty tracking)
       const updatedFish = [...fishMap.values()].map((f) => f.exportState());
+      const removedFishIds = pendingRemovals.splice(0);
 
-      if (updatedFish.length === 0) return null;
+      if (updatedFish.length === 0 && removedFishIds.length === 0) return null;
 
       return {
         tick,
         updatedFish,
-        removedFishIds: [],
+        removedFishIds,
       };
     },
 

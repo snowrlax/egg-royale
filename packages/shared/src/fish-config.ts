@@ -66,6 +66,6 @@ export const FLOP = {
 
   // ── Ground detection ──
   GROUND_RAY_LENGTH: 0.15,
-} as const;
+};
 
 export type FlopConfig = typeof FLOP;

@@ -205,11 +205,13 @@ async function main() {
     if (!session) return;
     sessions.delete(socketId);
 
-    if (reason === "disconnect") {
-      roomManager.disconnectPlayer(session.roomId, session.playerId);
-    } else {
-      roomManager.leaveRoom(session.roomId, session.playerId);
-    }
+    // Both leave and disconnect fully remove the player (no reconnect yet)
+    roomManager.leaveRoom(session.roomId, session.playerId);
+
+    foundation.io.to(session.roomId).emit(
+      serverEvents.playerLeft,
+      createEnvelope(serverEvents.playerLeft, { playerId: session.playerId })
+    );
   }
 
   function handleError(

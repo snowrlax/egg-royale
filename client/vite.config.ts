@@ -1,16 +1,22 @@
+import wasm from "vite-plugin-wasm";
 import { defineConfig } from "vite";
-import path from "node:path";
 
 export default defineConfig({
+  plugins: [wasm()],
   resolve: {
     alias: {
-      "@fish-jam/shared": path.resolve(__dirname, "../packages/shared/src"),
+      "@fish-jam/shared": new URL("../packages/shared/src", import.meta.url)
+        .pathname,
     },
   },
-  server: {
-    port: 5173,
+  build: {
+    target: "esnext",
   },
   optimizeDeps: {
     exclude: ["@dimforge/rapier3d"],
+  },
+  server: {
+    host: true,
+    port: 5173,
   },
 });
