@@ -40,10 +40,14 @@ export const leaveRoomRequestSchema = z.object({
   roomId: roomIdSchema,
 });
 
+export const playerInputPacketSchema = z.object({
+  inputs: z.array(playerInputSchema).min(1).max(3),
+});
+
 export const submitInputRequestSchema = z.object({
   roomId: roomIdSchema,
   playerId: playerIdSchema,
-  input: playerInputSchema,
+  inputs: z.array(playerInputSchema).min(1).max(3),
 });
 
 // ── State Snapshots ──

@@ -27,7 +27,7 @@ export type SocketManagerCallbacks = {
 export type SocketManager = {
   connect(serverUrl: string): void;
   quickJoin(displayName?: string): void;
-  sendInput(roomId: string, playerId: string, input: PlayerInput): void;
+  sendInputs(roomId: string, playerId: string, inputs: PlayerInput[]): void;
   disconnect(): void;
   isConnected(): boolean;
 };
@@ -130,14 +130,14 @@ export function createSocketManager(
       );
     },
 
-    sendInput(roomId, playerId, input) {
+    sendInputs(roomId, playerId, inputs) {
       if (!socket) return;
       socket.emit(
         clientEvents.playerInput,
         createEnvelope(clientEvents.playerInput, {
           roomId,
           playerId,
-          input,
+          inputs,
         })
       );
     },

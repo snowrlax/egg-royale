@@ -34,6 +34,10 @@ export type PlayerInput = {
   spaceJustReleased: boolean;
 };
 
+export type PlayerInputPacket = {
+  inputs: PlayerInput[]; // last N inputs, newest last (redundancy window)
+};
+
 export type GameSnapshot = {
   tick: number;
   fish: FishState[];

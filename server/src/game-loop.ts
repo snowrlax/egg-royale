@@ -25,6 +25,7 @@ export type GameLoop = {
 
 export function createGameLoop(): GameLoop {
   const world = new RAPIER.World({ x: 0, y: FLOP.GRAVITY, z: 0 });
+  world.timestep = TICK_DT;
 
   // Ground collider
   const groundDesc = RAPIER.ColliderDesc.cuboid(10, 0.15, 10)
@@ -91,9 +92,19 @@ export function createGameLoop(): GameLoop {
         if (!fish) continue;
 
         const latest = queue.pop();
-        queue.length = 0; // drain
         if (latest) {
-          fish.applyInput(latest);
+          // Merge spaceJustReleased from all queued inputs so jumps survive redundancy dedup
+          const hasSpaceRelease =
+            latest.spaceJustReleased ||
+            queue.some((inp) => inp.spaceJustReleased);
+          queue.length = 0; // drain
+          fish.applyInput(
+            hasSpaceRelease
+              ? { ...latest, spaceJustReleased: true }
+              : latest
+          );
+        } else {
+          queue.length = 0;
         }
       }
 
@@ -105,8 +116,10 @@ export function createGameLoop(): GameLoop {
       // Step physics
       world.step();
 
-      // Build delta (for now, always send all fish — optimize later with dirty tracking)
-      const updatedFish = [...fishMap.values()].map((f) => f.exportState());
+      // Build delta — only include fish that actually moved (dirty tracking)
+      const updatedFish = [...fishMap.values()]
+        .filter((f) => f.isDirty())
+        .map((f) => f.exportState());
       const removedFishIds = pendingRemovals.splice(0);
 
       if (updatedFish.length === 0 && removedFishIds.length === 0) return null;
@@ -121,7 +134,7 @@ export function createGameLoop(): GameLoop {
     exportSnapshot(): GameSnapshot {
       return {
         tick,
-        fish: [...fishMap.values()].map((f) => f.exportState()),
+        fish: [...fishMap.values()].map((f) => f.peekState()),
       };
     },
 

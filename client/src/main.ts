@@ -110,24 +110,31 @@ async function startGame(container: HTMLElement) {
     onJoined(result) {
       myPlayerId = result.playerId;
       roomCodeDiv.textContent = `Room: ${result.roomCode}`;
+      console.info(`[main] joined room=${result.roomCode} myId=${result.playerId.slice(-8)} snapshotFish=${result.snapshot.fish.length}`);
 
       // Create local fish — find our fish in the snapshot
       const myFishState = result.snapshot.fish.find(
         (f) => f.id === result.playerId
       );
       const fishColor = myFishState?.color ?? "#ff8c42";
+      const spawnPos = myFishState
+        ? { x: myFishState.body.pos[0], y: myFishState.body.pos[1], z: myFishState.body.pos[2] }
+        : { x: 0, y: 2, z: 0 };
 
       localFish = createLocalFish(
         result.playerId,
         world,
         gameScene.scene,
         gameScene.gradientTexture,
-        fishColor
+        fishColor,
+        spawnPos
       );
 
       // Create remote fish for everyone else
       for (const fs of result.snapshot.fish) {
         if (fs.id === result.playerId) continue;
+        const p = fs.body.pos;
+        console.info(`[main] creating RemoteFish id=${fs.id.slice(-8)} color=${fs.color} body.pos=(${p[0].toFixed(2)}, ${p[1].toFixed(2)}, ${p[2].toFixed(2)})`);
         remoteFishes.set(
           fs.id,
           createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture)
@@ -147,11 +154,14 @@ async function startGame(container: HTMLElement) {
           continue; // skip — local Rapier world is authoritative for feel
         }
         // Remote fish
+        const p = fs.body.pos;
         const existing = remoteFishes.get(fs.id);
         if (existing) {
+          console.info(`[main] delta update id=${fs.id.slice(-8)} body.pos=(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)}) phase=${fs.phase}`);
           updateRemoteFishState(existing, fs);
         } else {
           // New player joined — create remote fish
+          console.info(`[main] delta NEW fish id=${fs.id.slice(-8)} body.pos=(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`);
           remoteFishes.set(
             fs.id,
             createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture)
@@ -213,6 +223,7 @@ async function startGame(container: HTMLElement) {
   const _camTarget = new THREE.Vector3();
   const _camLookAt = new THREE.Vector3();
   let inputSeq = 0;
+  let frameCount = 0;
 
   function tick() {
     const dt = Math.min(clock.getDelta(), 0.05);
@@ -251,6 +262,13 @@ async function startGame(container: HTMLElement) {
 
       // Sync local fish meshes from Rapier
       syncFishMeshes(localFish);
+
+      // Log local fish position every 60 frames (~1/sec)
+      frameCount++;
+      if (frameCount % 60 === 0) {
+        const lp = localFish.body.translation();
+        console.info(`[main] localFish body.pos=(${lp.x.toFixed(3)}, ${lp.y.toFixed(3)}, ${lp.z.toFixed(3)}) phase=${localFish.phase}`);
+      }
 
       // Camera follow
       const bp = localFish.body.translation();

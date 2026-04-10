@@ -1,21 +1,28 @@
 /**
  * Visual-only remote fish — no Rapier physics.
- * Receives FishState from server and interpolates between states for smooth rendering.
+ * Receives FishState from server and interpolates between buffered states.
+ * Renders 2 ticks behind (~66ms at 30Hz) for smooth motion.
  */
 
 import * as THREE from "three";
 import type { FishState, BodySnapshot } from "@fish-jam/shared";
 import { createFishMeshes, syncEyesToHead, type FishMeshes } from "./fish-flop.js";
 
-const INTERP_DURATION_MS = 1000 / 30; // match server tick rate
+const TICK_MS = 1000 / 30;
+const BUFFER_SIZE = 5;
+const RENDER_DELAY_TICKS = 2;
+const MAX_EXTRAPOLATION = 1.5;
+
+type BufferedState = {
+  state: FishState;
+  receivedAt: number;
+};
 
 export type RemoteFish = {
   id: string;
   color: string;
   meshes: FishMeshes;
-  prevState: FishState | null;
-  currState: FishState;
-  stateTimestamp: number;
+  stateBuffer: BufferedState[];
 };
 
 export function createRemoteFish(
@@ -32,9 +39,7 @@ export function createRemoteFish(
     id: initialState.id,
     color: initialState.color,
     meshes,
-    prevState: null,
-    currState: initialState,
-    stateTimestamp: performance.now(),
+    stateBuffer: [{ state: initialState, receivedAt: performance.now() }],
   };
 }
 
@@ -42,27 +47,65 @@ export function updateRemoteFishState(
   fish: RemoteFish,
   newState: FishState
 ): void {
-  fish.prevState = fish.currState;
-  fish.currState = newState;
-  fish.stateTimestamp = performance.now();
+  fish.stateBuffer.push({ state: newState, receivedAt: performance.now() });
+  if (fish.stateBuffer.length > BUFFER_SIZE) {
+    fish.stateBuffer.shift();
+  }
 }
 
 export function interpolateRemoteFish(
   fish: RemoteFish,
   now: number
 ): void {
-  if (!fish.prevState) {
-    // No previous state — snap directly
-    applyStateToMeshes(fish.meshes, fish.currState);
+  const buf = fish.stateBuffer;
+  if (buf.length === 0) return;
+
+  // Only one state — snap directly
+  if (buf.length === 1) {
+    applyStateToMeshes(fish.meshes, buf[0].state);
     return;
   }
 
-  const elapsed = now - fish.stateTimestamp;
-  const t = Math.min(elapsed / INTERP_DURATION_MS, 1);
+  // Render 2 ticks behind latest received time for smooth interpolation
+  const renderTime = now - TICK_MS * RENDER_DELAY_TICKS;
 
-  lerpBodySnapshot(fish.meshes.headMesh, fish.prevState.head, fish.currState.head, t);
-  lerpBodySnapshot(fish.meshes.bodyMesh, fish.prevState.body, fish.currState.body, t);
-  lerpBodySnapshot(fish.meshes.tailMesh, fish.prevState.tail, fish.currState.tail, t);
+  // If renderTime is before all entries, snap to oldest
+  if (renderTime <= buf[0].receivedAt) {
+    applyStateToMeshes(fish.meshes, buf[0].state);
+    return;
+  }
+
+  // Find two states that bracket renderTime
+  let i0 = 0;
+  for (let i = 0; i < buf.length - 1; i++) {
+    if (buf[i + 1].receivedAt > renderTime) {
+      i0 = i;
+      break;
+    }
+    i0 = i;
+  }
+  const i1 = Math.min(i0 + 1, buf.length - 1);
+
+  if (i0 === i1) {
+    applyStateToMeshes(fish.meshes, buf[i0].state);
+    return;
+  }
+
+  const t0 = buf[i0].receivedAt;
+  const t1 = buf[i1].receivedAt;
+  const span = t1 - t0;
+
+  if (span <= 0) {
+    applyStateToMeshes(fish.meshes, buf[i1].state);
+    return;
+  }
+
+  // Allow slight extrapolation (up to 1.5x) but cap it
+  const alpha = Math.min((renderTime - t0) / span, MAX_EXTRAPOLATION);
+
+  lerpBodySnapshot(fish.meshes.headMesh, buf[i0].state.head, buf[i1].state.head, alpha);
+  lerpBodySnapshot(fish.meshes.bodyMesh, buf[i0].state.body, buf[i1].state.body, alpha);
+  lerpBodySnapshot(fish.meshes.tailMesh, buf[i0].state.tail, buf[i1].state.tail, alpha);
   syncEyesToHead(fish.meshes.eyeL, fish.meshes.eyeR, fish.meshes.headMesh);
 }
 

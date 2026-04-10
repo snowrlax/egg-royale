@@ -43,6 +43,7 @@ async function main() {
     socketId: string;
     roomId: string;
     playerId: string;
+    lastProcessedSeq: number;
   };
 
   const sessions = new Map<string, Session>();
@@ -79,6 +80,7 @@ async function main() {
           socketId: socket.id,
           roomId: result.roomId,
           playerId: result.playerId,
+          lastProcessedSeq: -1,
         });
         socket.join(result.roomId);
 
@@ -109,6 +111,7 @@ async function main() {
           socketId: socket.id,
           roomId: result.roomId,
           playerId: result.playerId,
+          lastProcessedSeq: -1,
         });
         socket.join(result.roomId);
 
@@ -142,6 +145,7 @@ async function main() {
           socketId: socket.id,
           roomId: result.roomId,
           playerId: result.playerId,
+          lastProcessedSeq: -1,
         });
         socket.join(result.roomId);
 
@@ -158,7 +162,7 @@ async function main() {
       }
     });
 
-    // ── Player Input ──
+    // ── Player Input (with redundancy dedup) ──
     socket.on(clientEvents.playerInput, (raw: unknown) => {
       try {
         const envelope = parseEnvelope(
@@ -178,11 +182,17 @@ async function main() {
           emitError(socket, "invalid-payload", "session mismatch");
           return;
         }
-        roomManager.submitInput(
-          envelope.payload.roomId,
-          envelope.payload.playerId,
-          envelope.payload.input
-        );
+        // Deduplicate: only forward inputs newer than lastProcessedSeq
+        for (const input of envelope.payload.inputs) {
+          if (input.seq > session.lastProcessedSeq) {
+            roomManager.submitInput(
+              envelope.payload.roomId,
+              envelope.payload.playerId,
+              input
+            );
+            session.lastProcessedSeq = input.seq;
+          }
+        }
       } catch (err) {
         handleError(socket, err);
       }

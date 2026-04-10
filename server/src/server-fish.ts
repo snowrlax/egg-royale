@@ -79,6 +79,7 @@ export type ServerFish = {
   moveY: number;
   spaceDown: boolean;
   spaceJustReleased: boolean;
+  prevExportedState: FishState | null;
 
   head: RAPIER.RigidBody;
   body: RAPIER.RigidBody;
@@ -86,6 +87,8 @@ export type ServerFish = {
   headJoint: RAPIER.ImpulseJoint;
   tailJoint: RAPIER.ImpulseJoint;
 
+  isDirty(): boolean;
+  peekState(): FishState;
   exportState(): FishState;
   applyInput(input: PlayerInput): void;
   step(world: RAPIER.World, dt: number): void;
@@ -180,6 +183,32 @@ export function createServerFish(
   setMotor(headJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
   setMotor(tailJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
 
+  // ── Dirty-check helper ──
+  const DIRTY_THRESHOLD = 0.01;
+
+  function isBodyDirty(
+    rb: RAPIER.RigidBody,
+    prevPos: [number, number, number],
+    prevRot: [number, number, number, number]
+  ): boolean {
+    const p = rb.translation();
+    if (
+      Math.abs(p.x - prevPos[0]) > DIRTY_THRESHOLD ||
+      Math.abs(p.y - prevPos[1]) > DIRTY_THRESHOLD ||
+      Math.abs(p.z - prevPos[2]) > DIRTY_THRESHOLD
+    )
+      return true;
+    const r = rb.rotation();
+    if (
+      Math.abs(r.x - prevRot[0]) > DIRTY_THRESHOLD ||
+      Math.abs(r.y - prevRot[1]) > DIRTY_THRESHOLD ||
+      Math.abs(r.z - prevRot[2]) > DIRTY_THRESHOLD ||
+      Math.abs(r.w - prevRot[3]) > DIRTY_THRESHOLD
+    )
+      return true;
+    return false;
+  }
+
   // ── State ──
   const fish: ServerFish = {
     id,
@@ -195,12 +224,23 @@ export function createServerFish(
     moveY: 0,
     spaceDown: false,
     spaceJustReleased: false,
+    prevExportedState: null,
 
     head: headRB,
     body: bodyRB,
     tail: tailRB,
     headJoint,
     tailJoint,
+
+    isDirty(): boolean {
+      const prev = fish.prevExportedState;
+      if (!prev) return true; // first export is always dirty
+      if (prev.phase !== fish.phase) return true;
+      if (isBodyDirty(bodyRB, prev.body.pos, prev.body.rot)) return true;
+      if (isBodyDirty(headRB, prev.head.pos, prev.head.rot)) return true;
+      if (isBodyDirty(tailRB, prev.tail.pos, prev.tail.rot)) return true;
+      return false;
+    },
 
     applyInput(input: PlayerInput) {
       fish.moveX = input.moveX;
@@ -213,7 +253,7 @@ export function createServerFish(
       stepFish(fish, world, dt);
     },
 
-    exportState(): FishState {
+    peekState(): FishState {
       const bp = bodyRB.translation();
       const br = bodyRB.rotation();
       const hp = headRB.translation();
@@ -231,6 +271,12 @@ export function createServerFish(
         damage: fish.damage,
         color: fish.color,
       };
+    },
+
+    exportState(): FishState {
+      const state = fish.peekState();
+      fish.prevExportedState = state;
+      return state;
     },
 
     reset() {
