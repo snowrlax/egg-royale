@@ -9,6 +9,7 @@ import {
 } from "@fish-jam/shared";
 
 import { createGameScene } from "./scene.js";
+import { loadKitchen } from "./kitchen.js";
 import {
   loadFishModel,
   createLocalFish,
@@ -59,6 +60,10 @@ async function startGame(container: HTMLElement) {
 
   // ── Scene ──
   const gameScene = createGameScene(container);
+
+  // ── Kitchen — fire and forget (no loading screen) ──
+  // Check the browser console for "[kitchen] natural size" after it loads
+  loadKitchen(gameScene.scene).catch(console.error);
 
   // ── Local Rapier world (client prediction) ──
   const PHYSICS_DT = 1 / 30;

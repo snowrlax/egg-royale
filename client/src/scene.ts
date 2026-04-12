@@ -59,20 +59,17 @@ export function createGameScene(container: HTMLElement): GameScene {
   gradientTexture.magFilter = THREE.NearestFilter;
   gradientTexture.needsUpdate = true;
 
-  // Ground mesh (visual only, no Rapier)
-  const groundGeo = new THREE.BoxGeometry(20, 0.3, 20);
+  // Temporary floor — will be replaced visually by the kitchen GLB
+  // Keep this so fish don't fall through before the model loads
+  const groundGeo = new THREE.BoxGeometry(30, 0.3, 30);
   const groundMat = new THREE.MeshStandardMaterial({
-    color: 0x8b7d6b,
-    roughness: 0.8,
-    metalness: 0.05,
+    color: 0x2a2a2a,
+    roughness: 0.9,
+    metalness: 0.0,
   });
   const groundMesh = new THREE.Mesh(groundGeo, groundMat);
   groundMesh.receiveShadow = true;
   scene.add(groundMesh);
-
-  const grid = new THREE.GridHelper(10, 20, 0xbbbbbb, 0xdddddd);
-  grid.position.y = 0.16;
-  scene.add(grid);
 
   // Resize
   const onResize = () => {
