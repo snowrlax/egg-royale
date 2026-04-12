@@ -194,29 +194,15 @@ export function createFishMeshes(
 // ─────────────────────────────────────────────
 
 export function createGroundCollider(world: RAPIER.World): RAPIER.Collider {
-  const desc = RAPIER.ColliderDesc.cuboid(10, 0.15, 10)
+  // Ground extended to cover kitchen at scale 5 (~35 units wide, 30 half-extent = safe)
+  const desc = RAPIER.ColliderDesc.cuboid(30, 0.15, 30)
     .setFriction(FLOP.GROUND_FRICTION)
     .setRestitution(FLOP.GROUND_RESTITUTION)
     .setCollisionGroups(0x00010002);
   const ground = world.createCollider(desc);
 
-  // Walls at edges (half-extents: thin x tall x matches ground side)
-  const wallHeight = 1.5;
-  const wallThick = 0.15;
-  const size = 10;
-  const walls = [
-    { hx: size, hy: wallHeight, hz: wallThick, tx: 0, tz: size },   // +Z
-    { hx: size, hy: wallHeight, hz: wallThick, tx: 0, tz: -size },  // -Z
-    { hx: wallThick, hy: wallHeight, hz: size, tx: size, tz: 0 },   // +X
-    { hx: wallThick, hy: wallHeight, hz: size, tx: -size, tz: 0 },  // -X
-  ];
-  for (const w of walls) {
-    const wallDesc = RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
-      .setTranslation(w.tx, wallHeight, w.tz)
-      .setRestitution(0.5)
-      .setCollisionGroups(0x00010002);
-    world.createCollider(wallDesc);
-  }
+  // Edge walls removed — kitchen model provides natural boundaries.
+  // Counter/shelf colliders will be added separately.
 
   return ground;
 }

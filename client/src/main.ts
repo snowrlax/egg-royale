@@ -71,6 +71,10 @@ async function startGame(container: HTMLElement) {
   world.timestep = PHYSICS_DT;
   createGroundCollider(world);
 
+  // ── Camera config (tunable via GUI) ──
+  const CAM = { distance: 16, height: 10, smoothness: 0.05, mouseSensitivity: 0.005, rotateSpeed: 1.5 };
+  let camAngle = 0; // radians — orbit angle around fish
+
   // ── Tweaking GUI ──
   const gui = new GUI({ title: "Fish Tuning" });
 
@@ -102,6 +106,13 @@ async function startGame(container: HTMLElement) {
   steerFolder.add(FLOP, "RECOVERY_TORQUE", 1, 50, 1).name("Recovery Torque");
   steerFolder.add(FLOP, "FACING_TORQUE", 1, 40, 1).name("Facing Torque");
   steerFolder.add(FLOP, "FACING_DAMPING", 1, 20, 0.5).name("Facing Damping");
+
+  const camFolder = gui.addFolder("Camera");
+  camFolder.add(CAM, "distance", 4, 40, 0.5).name("Zoom (distance)");
+  camFolder.add(CAM, "height", 2, 25, 0.5).name("Height");
+  camFolder.add(CAM, "smoothness", 0.01, 0.2, 0.01).name("Smoothness");
+  camFolder.add(CAM, "mouseSensitivity", 0.001, 0.02, 0.001).name("Mouse Sensitivity");
+  camFolder.add(CAM, "rotateSpeed", 0.5, 5, 0.1).name("Key Rotate Speed");
 
   // ── State ──
   let localFish: LocalFish | null = null;
@@ -225,6 +236,24 @@ async function startGame(container: HTMLElement) {
     }
   });
 
+  // ── Mouse drag to orbit camera ──
+  let isDragging = false;
+  let lastPointerX = 0;
+  gameScene.renderer.domElement.addEventListener("pointerdown", (e) => {
+    isDragging = true;
+    lastPointerX = e.clientX;
+    gameScene.renderer.domElement.setPointerCapture(e.pointerId);
+  });
+  gameScene.renderer.domElement.addEventListener("pointermove", (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - lastPointerX;
+    camAngle += dx * CAM.mouseSensitivity;
+    lastPointerX = e.clientX;
+  });
+  gameScene.renderer.domElement.addEventListener("pointerup", () => {
+    isDragging = false;
+  });
+
   // ── Game loop (fixed-timestep accumulator) ──
   const clock = new THREE.Clock();
   const _camTarget = new THREE.Vector3();
@@ -243,23 +272,24 @@ async function startGame(container: HTMLElement) {
 
       // Step physics at fixed rate — may step 0, 1, or 2 times per render frame
       while (physicsAccumulator >= PHYSICS_DT) {
-        // Build input from current keyboard state
-        let moveX = 0;
-        let moveY = 0;
-        if (keys.has("a") || keys.has("arrowleft")) moveX = -1;
-        if (keys.has("d") || keys.has("arrowright")) moveX = 1;
-        if (keys.has("w") || keys.has("arrowup")) moveY = -1;
-        if (keys.has("s") || keys.has("arrowdown")) moveY = 1;
-        const len = Math.sqrt(moveX * moveX + moveY * moveY);
-        if (len > 0) {
-          moveX /= len;
-          moveY /= len;
-        }
+        // WASD movement relative to camera angle
+        // Camera forward = (sin, 0, cos), camera right = (cos, 0, -sin)
+        let fwd = 0, strafe = 0;
+        if (keys.has("w") || keys.has("arrowup"))    fwd    =  1;
+        if (keys.has("s") || keys.has("arrowdown"))  fwd    = -1;
+        if (keys.has("a") || keys.has("arrowleft"))  strafe = -1;
+        if (keys.has("d") || keys.has("arrowright")) strafe =  1;
+
+        const rawX = fwd * Math.sin(camAngle) + strafe * Math.cos(camAngle);
+        const rawY = fwd * Math.cos(camAngle) - strafe * Math.sin(camAngle);
+        const len = Math.sqrt(rawX * rawX + rawY * rawY);
+        const normX = len > 0 ? rawX / len : 0;
+        const normY = len > 0 ? rawY / len : 0;
 
         const input: PlayerInput = {
           seq: inputSeq++,
-          moveX,
-          moveY,
+          moveX: normX,
+          moveY: normY,
           spaceDown,
           spaceJustReleased,
         };
@@ -280,11 +310,13 @@ async function startGame(container: HTMLElement) {
       // Sync local fish meshes from Rapier (runs every render frame)
       syncFishMeshes(localFish);
 
-      // Camera follow
+      // Camera follow — orbit around fish using camAngle
       const bp = localFish.body.translation();
-      _camTarget.set(bp.x, bp.y + 5, bp.z + 7);
-      gameScene.camera.position.lerp(_camTarget, 0.05);
-      _camLookAt.set(bp.x, bp.y + 0.5, bp.z);
+      const camOffX = Math.sin(camAngle) * CAM.distance;
+      const camOffZ = Math.cos(camAngle) * CAM.distance;
+      _camTarget.set(bp.x + camOffX, bp.y + CAM.height, bp.z + camOffZ);
+      gameScene.camera.position.lerp(_camTarget, CAM.smoothness);
+      _camLookAt.set(bp.x, bp.y + 1, bp.z);
       gameScene.camera.lookAt(_camLookAt);
     }
 
