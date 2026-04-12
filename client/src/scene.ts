@@ -10,7 +10,8 @@ export type GameScene = {
 
 export function createGameScene(container: HTMLElement): GameScene {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0xf0ece4);
+  scene.background = new THREE.Color(0x1a1a1f);
+  scene.fog = new THREE.Fog(0x1a1a1f, 25, 55);
 
   const camera = new THREE.PerspectiveCamera(
     45,
@@ -18,31 +19,38 @@ export function createGameScene(container: HTMLElement): GameScene {
     0.1,
     100
   );
-  camera.position.set(0, 5, 7);
-  camera.lookAt(0, 0.5, 0);
+  camera.position.set(0, 10, 16);
+  camera.lookAt(0, 2, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMapping = THREE.NeutralToneMapping;   // less aggressive than ACES for indoor scenes
+  renderer.toneMappingExposure = 1.8;                // brighten overall exposure
   container.appendChild(renderer.domElement);
 
   // Lighting
-  const ambient = new THREE.AmbientLight(0xfff5e6, 0.5);
+  const ambient = new THREE.AmbientLight(0xfff5e6, 2.5);  // much brighter base fill
   scene.add(ambient);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-  sun.position.set(4, 8, -3);
+  // Key light (above, front-right)
+  const sun = new THREE.DirectionalLight(0xfff0dd, 2.0);
+  sun.position.set(6, 12, -5);
+
+  // Fill light (opposite side — stops surfaces going pitch black)
+  const fill = new THREE.DirectionalLight(0xddeeff, 0.8);
+  fill.position.set(-8, 6, 8);
+  scene.add(fill);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(2048, 2048);
   sun.shadow.camera.near = 0.5;
-  sun.shadow.camera.far = 20;
-  sun.shadow.camera.left = -6;
-  sun.shadow.camera.right = 6;
-  sun.shadow.camera.top = 6;
-  sun.shadow.camera.bottom = -6;
+  sun.shadow.camera.far = 40;
+  sun.shadow.camera.left = -12;
+  sun.shadow.camera.right = 12;
+  sun.shadow.camera.top = 12;
+  sun.shadow.camera.bottom = -12;
   scene.add(sun);
 
   const hemi = new THREE.HemisphereLight(0x87ceeb, 0x8b7355, 0.25);
