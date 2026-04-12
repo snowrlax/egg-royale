@@ -113,22 +113,23 @@ export function createServerFish(
   // ── HEAD ──
   const headDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z - 0.55)
-    .setLinearDamping(0)
-    .setAngularDamping(0.3);
+    .setLinearDamping(FLOP.LINEAR_DAMPING)
+    .setAngularDamping(FLOP.ANGULAR_DAMPING);
   const headRB = world.createRigidBody(headDesc);
   const headCollDesc = RAPIER.ColliderDesc.ball(FLOP.HEAD_RADIUS)
     .setDensity(
       FLOP.HEAD_MASS / ((4 / 3) * Math.PI * FLOP.HEAD_RADIUS ** 3)
     )
     .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION);
+    .setRestitution(FLOP.FISH_RESTITUTION)
+    .setCollisionGroups(0x00020001);
   world.createCollider(headCollDesc, headRB);
 
   // ── BODY ──
   const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z)
-    .setLinearDamping(0)
-    .setAngularDamping(0.3);
+    .setLinearDamping(FLOP.LINEAR_DAMPING)
+    .setAngularDamping(FLOP.ANGULAR_DAMPING);
   const bodyRB = world.createRigidBody(bodyDesc);
   const bodyVol =
     Math.PI *
@@ -140,21 +141,23 @@ export function createServerFish(
   )
     .setDensity(FLOP.BODY_MASS / bodyVol)
     .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION);
+    .setRestitution(FLOP.FISH_RESTITUTION)
+    .setCollisionGroups(0x00020001);
   world.createCollider(bodyCollDesc, bodyRB);
 
   // ── TAIL ──
   const tailDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z + 0.55)
-    .setLinearDamping(0)
-    .setAngularDamping(0.2);
+    .setLinearDamping(FLOP.LINEAR_DAMPING)
+    .setAngularDamping(FLOP.ANGULAR_DAMPING);
   const tailRB = world.createRigidBody(tailDesc);
   const tailCollDesc = RAPIER.ColliderDesc.ball(FLOP.TAIL_RADIUS)
     .setDensity(
       FLOP.TAIL_MASS / ((4 / 3) * Math.PI * FLOP.TAIL_RADIUS ** 3)
     )
     .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION);
+    .setRestitution(FLOP.FISH_RESTITUTION)
+    .setCollisionGroups(0x00020001);
   world.createCollider(tailCollDesc, tailRB);
 
   // ── JOINTS (Y axis — horizontal lateral bend) ──
@@ -404,7 +407,7 @@ function stepFish(
   }
 
   clampVelocity(fish.body, FLOP.MAX_VELOCITY);
-  clampVelocity(fish.head, FLOP.MAX_VELOCITY);
+  clampVelocity(fish.head, FLOP.MAX_VELOCITY * 1.2);
   clampVelocity(fish.tail, FLOP.MAX_VELOCITY * 1.2);
 
   const s = fish.curlSign;

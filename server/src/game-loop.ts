@@ -30,7 +30,8 @@ export function createGameLoop(): GameLoop {
   // Ground collider
   const groundDesc = RAPIER.ColliderDesc.cuboid(10, 0.15, 10)
     .setFriction(FLOP.GROUND_FRICTION)
-    .setRestitution(FLOP.GROUND_RESTITUTION);
+    .setRestitution(FLOP.GROUND_RESTITUTION)
+    .setCollisionGroups(0x00010002);
   world.createCollider(groundDesc);
 
   // Edge walls
@@ -46,7 +47,8 @@ export function createGameLoop(): GameLoop {
   for (const w of walls) {
     const wallDesc = RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
       .setTranslation(w.tx, wallHeight, w.tz)
-      .setRestitution(0.5);
+      .setRestitution(0.5)
+      .setCollisionGroups(0x00010002);
     world.createCollider(wallDesc);
   }
 

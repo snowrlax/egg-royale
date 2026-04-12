@@ -13,10 +13,12 @@ const SPAWN_POSITIONS = [
 ];
 export function createGameLoop() {
     const world = new RAPIER.World({ x: 0, y: FLOP.GRAVITY, z: 0 });
+    world.timestep = TICK_DT;
     // Ground collider
     const groundDesc = RAPIER.ColliderDesc.cuboid(10, 0.15, 10)
         .setFriction(FLOP.GROUND_FRICTION)
-        .setRestitution(FLOP.GROUND_RESTITUTION);
+        .setRestitution(FLOP.GROUND_RESTITUTION)
+        .setCollisionGroups(0x00010002);
     world.createCollider(groundDesc);
     // Edge walls
     const wallHeight = 1.5;
@@ -31,7 +33,8 @@ export function createGameLoop() {
     for (const w of walls) {
         const wallDesc = RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
             .setTranslation(w.tx, wallHeight, w.tz)
-            .setRestitution(0.5);
+            .setRestitution(0.5)
+            .setCollisionGroups(0x00010002);
         world.createCollider(wallDesc);
     }
     const fishMap = new Map();

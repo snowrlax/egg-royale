@@ -12,6 +12,7 @@
  */
 
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import RAPIER from "@dimforge/rapier3d/rapier.js";
 import GUI from "lil-gui";
 import { FLOP, type FlopPhase, type PlayerInput } from "@fish-jam/shared";
@@ -45,6 +46,63 @@ export type LocalFish = {
 };
 
 // ─────────────────────────────────────────────
+// GLB MODEL LOADER
+// ─────────────────────────────────────────────
+
+let _fishModel: {
+  headGeo: THREE.BufferGeometry;
+  bodyGeo: THREE.BufferGeometry;
+  tailGeo: THREE.BufferGeometry;
+  material: THREE.MeshStandardMaterial;
+} | null = null;
+
+export async function loadFishModel(url: string): Promise<void> {
+  const loader = new GLTFLoader();
+  const gltf = await loader.loadAsync(url);
+
+  let headGeo: THREE.BufferGeometry | undefined;
+  let bodyGeo: THREE.BufferGeometry | undefined;
+  let tailGeo: THREE.BufferGeometry | undefined;
+  let material: THREE.MeshStandardMaterial | undefined;
+
+  gltf.scene.traverse((child) => {
+    if (!(child as THREE.Mesh).isMesh) return;
+    const mesh = child as THREE.Mesh;
+    const name = mesh.name.replace(/[\s_]+$/, "").toLowerCase();
+
+    // Bake node rotation into geometry (Blender Z-up → glTF Y-up)
+    const rotMat = new THREE.Matrix4().makeRotationFromQuaternion(mesh.quaternion);
+    mesh.geometry.applyMatrix4(rotMat);
+
+    // Center geometry at origin — vertices are in scene-space, not node-local
+    mesh.geometry.computeBoundingBox();
+    const center = new THREE.Vector3();
+    mesh.geometry.boundingBox!.getCenter(center);
+    mesh.geometry.translate(-center.x, -center.y, -center.z);
+
+    // Mirror facing direction (model faces +Z, game expects -Z)
+    mesh.geometry.rotateY(Math.PI);
+
+    if (name === "head") {
+      mesh.geometry.translate(0, 0, -0.2);
+      headGeo = mesh.geometry;
+    } else if (name === "body") bodyGeo = mesh.geometry;
+    else if (name === "tail") tailGeo = mesh.geometry;
+
+    if (!material) {
+      const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      if (mat instanceof THREE.MeshStandardMaterial) material = mat;
+    }
+  });
+
+  if (!headGeo || !bodyGeo || !tailGeo || !material) {
+    throw new Error("Fish GLB missing head, body, or tail mesh");
+  }
+
+  _fishModel = { headGeo, bodyGeo, tailGeo, material };
+}
+
+// ─────────────────────────────────────────────
 // FISH MESHES (Three.js only — no Rapier)
 // ─────────────────────────────────────────────
 
@@ -56,25 +114,62 @@ export function createFishMeshes(
   const parsedColor = new THREE.Color(color);
   const headColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.2);
 
-  const bodyMat = new THREE.MeshToonMaterial({
-    color: parsedColor,
-    gradientMap: gradTex,
-  });
-  const headMat = new THREE.MeshToonMaterial({
-    color: headColor,
-    gradientMap: gradTex,
-  });
+  let headMesh: THREE.Mesh;
+  let bodyMesh: THREE.Mesh;
+  let tailMesh: THREE.Mesh;
+
+  if (_fishModel) {
+    // GLB model path — clone material per fish for color tinting
+    const bodyMat = _fishModel.material.clone();
+    bodyMat.color.set(parsedColor);
+    const headMat = _fishModel.material.clone();
+    headMat.color.set(headColor);
+
+    headMesh = new THREE.Mesh(_fishModel.headGeo, headMat);
+    bodyMesh = new THREE.Mesh(_fishModel.bodyGeo, bodyMat);
+    tailMesh = new THREE.Mesh(_fishModel.tailGeo, bodyMat);
+  } else {
+    // Procedural fallback (sandbox / model not loaded)
+    const bodyMat = new THREE.MeshToonMaterial({
+      color: parsedColor,
+      gradientMap: gradTex,
+    });
+    const headMat = new THREE.MeshToonMaterial({
+      color: headColor,
+      gradientMap: gradTex,
+    });
+
+    const headGeo = new THREE.SphereGeometry(FLOP.HEAD_RADIUS, 12, 8);
+    headMesh = new THREE.Mesh(headGeo, headMat);
+    headMesh.scale.set(0.7, 1.0, 1.0);
+
+    const bodyGeo = new THREE.CapsuleGeometry(
+      FLOP.BODY_RADIUS,
+      FLOP.BODY_HALF_HEIGHT * 2,
+      8,
+      12
+    );
+    bodyGeo.rotateX(Math.PI / 2);
+    bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
+    bodyMesh.scale.set(0.65, 1.1, 1.0);
+
+    const tailGeo = new THREE.ConeGeometry(0.22, 0.45, 4);
+    tailGeo.rotateX(-Math.PI / 2);
+    tailGeo.rotateY(Math.PI / 4);
+    tailMesh = new THREE.Mesh(tailGeo, bodyMat);
+    tailMesh.scale.set(0.5, 1.3, 1.0);
+  }
+
+  headMesh.castShadow = true;
+  bodyMesh.castShadow = true;
+  tailMesh.castShadow = true;
+  scene.add(headMesh);
+  scene.add(bodyMesh);
+  scene.add(tailMesh);
+
+  // Eyes (procedural — hidden when using GLB model)
   const eyeWhite = new THREE.MeshBasicMaterial({ color: 0xffffff });
   const eyePupil = new THREE.MeshBasicMaterial({ color: 0x111111 });
-
-  // Head
-  const headGeo = new THREE.SphereGeometry(FLOP.HEAD_RADIUS, 12, 8);
-  const headMesh = new THREE.Mesh(headGeo, headMat);
-  headMesh.castShadow = true;
-  headMesh.scale.set(0.7, 1.0, 1.0);
-  scene.add(headMesh);
-
-  // Eyes
   const eyeGeo = new THREE.SphereGeometry(0.06, 8, 6);
   const pupilGeo = new THREE.SphereGeometry(0.035, 8, 6);
 
@@ -86,27 +181,10 @@ export function createFishMeshes(
   eyeR.add(new THREE.Mesh(pupilGeo, eyePupil).translateZ(-0.03));
   scene.add(eyeR);
 
-  // Body
-  const bodyGeo = new THREE.CapsuleGeometry(
-    FLOP.BODY_RADIUS,
-    FLOP.BODY_HALF_HEIGHT * 2,
-    8,
-    12
-  );
-  bodyGeo.rotateX(Math.PI / 2);
-  const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-  bodyMesh.castShadow = true;
-  bodyMesh.scale.set(0.65, 1.1, 1.0);
-  scene.add(bodyMesh);
-
-  // Tail
-  const tailGeo = new THREE.ConeGeometry(0.22, 0.45, 4);
-  tailGeo.rotateX(-Math.PI / 2);
-  tailGeo.rotateY(Math.PI / 4);
-  const tailMesh = new THREE.Mesh(tailGeo, bodyMat);
-  tailMesh.castShadow = true;
-  tailMesh.scale.set(0.5, 1.3, 1.0);
-  scene.add(tailMesh);
+  if (_fishModel) {
+    eyeL.visible = false;
+    eyeR.visible = false;
+  }
 
   return { headMesh, bodyMesh, tailMesh, eyeL, eyeR };
 }
@@ -118,7 +196,8 @@ export function createFishMeshes(
 export function createGroundCollider(world: RAPIER.World): RAPIER.Collider {
   const desc = RAPIER.ColliderDesc.cuboid(10, 0.15, 10)
     .setFriction(FLOP.GROUND_FRICTION)
-    .setRestitution(FLOP.GROUND_RESTITUTION);
+    .setRestitution(FLOP.GROUND_RESTITUTION)
+    .setCollisionGroups(0x00010002);
   const ground = world.createCollider(desc);
 
   // Walls at edges (half-extents: thin x tall x matches ground side)
@@ -134,7 +213,8 @@ export function createGroundCollider(world: RAPIER.World): RAPIER.Collider {
   for (const w of walls) {
     const wallDesc = RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
       .setTranslation(w.tx, wallHeight, w.tz)
-      .setRestitution(0.5);
+      .setRestitution(0.5)
+      .setCollisionGroups(0x00010002);
     world.createCollider(wallDesc);
   }
 
@@ -158,20 +238,21 @@ export function createLocalFish(
   // HEAD rigid body
   const headDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z - 0.55)
-    .setLinearDamping(0)
-    .setAngularDamping(0.3);
+    .setLinearDamping(FLOP.LINEAR_DAMPING)
+    .setAngularDamping(FLOP.ANGULAR_DAMPING);
   const headRB = world.createRigidBody(headDesc);
   const headCollDesc = RAPIER.ColliderDesc.ball(FLOP.HEAD_RADIUS)
     .setDensity(FLOP.HEAD_MASS / ((4 / 3) * Math.PI * FLOP.HEAD_RADIUS ** 3))
     .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION);
+    .setRestitution(FLOP.FISH_RESTITUTION)
+    .setCollisionGroups(0x00020001);
   world.createCollider(headCollDesc, headRB);
 
   // BODY rigid body
   const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z)
-    .setLinearDamping(0)
-    .setAngularDamping(0.3);
+    .setLinearDamping(FLOP.LINEAR_DAMPING)
+    .setAngularDamping(FLOP.ANGULAR_DAMPING);
   const bodyRB = world.createRigidBody(bodyDesc);
   const bodyVol =
     Math.PI *
@@ -183,19 +264,21 @@ export function createLocalFish(
   )
     .setDensity(FLOP.BODY_MASS / bodyVol)
     .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION);
+    .setRestitution(FLOP.FISH_RESTITUTION)
+    .setCollisionGroups(0x00020001);
   world.createCollider(bodyCollDesc, bodyRB);
 
   // TAIL rigid body
   const tailDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z + 0.55)
-    .setLinearDamping(0)
-    .setAngularDamping(0.2);
+    .setLinearDamping(FLOP.LINEAR_DAMPING)
+    .setAngularDamping(FLOP.ANGULAR_DAMPING);
   const tailRB = world.createRigidBody(tailDesc);
   const tailCollDesc = RAPIER.ColliderDesc.ball(FLOP.TAIL_RADIUS)
     .setDensity(FLOP.TAIL_MASS / ((4 / 3) * Math.PI * FLOP.TAIL_RADIUS ** 3))
     .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION);
+    .setRestitution(FLOP.FISH_RESTITUTION)
+    .setCollisionGroups(0x00020001);
   world.createCollider(tailCollDesc, tailRB);
 
   // JOINTS — Y axis (horizontal lateral bend)
@@ -455,7 +538,7 @@ export function updateLocalFish(
   }
 
   clampVelocity(fish.body, FLOP.MAX_VELOCITY);
-  clampVelocity(fish.head, FLOP.MAX_VELOCITY);
+  clampVelocity(fish.head, FLOP.MAX_VELOCITY * 1.2);
   clampVelocity(fish.tail, FLOP.MAX_VELOCITY * 1.2);
 
   const s = fish.curlSign;

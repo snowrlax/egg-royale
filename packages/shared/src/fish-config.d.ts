@@ -42,6 +42,8 @@ export declare const FLOP: {
     GROUND_RESTITUTION: number;
     FISH_FRICTION: number;
     FISH_RESTITUTION: number;
+    LINEAR_DAMPING: number;
+    ANGULAR_DAMPING: number;
     GROUND_RAY_LENGTH: number;
 };
 export type FlopConfig = typeof FLOP;

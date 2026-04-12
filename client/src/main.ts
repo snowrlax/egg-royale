@@ -10,6 +10,7 @@ import {
 
 import { createGameScene } from "./scene.js";
 import {
+  loadFishModel,
   createLocalFish,
   createGroundCollider,
   updateLocalFish,
@@ -52,11 +53,17 @@ async function boot() {
 }
 
 async function startGame(container: HTMLElement) {
+  // ── Load fish model ──
+  const modelUrl = new URL("../models/fish.glb", import.meta.url).href;
+  await loadFishModel(modelUrl);
+
   // ── Scene ──
   const gameScene = createGameScene(container);
 
   // ── Local Rapier world (client prediction) ──
+  const PHYSICS_DT = 1 / 30;
   const world = new RAPIER.World({ x: 0, y: FLOP.GRAVITY, z: 0 });
+  world.timestep = PHYSICS_DT;
   createGroundCollider(world);
 
   // ── Tweaking GUI ──
@@ -133,8 +140,6 @@ async function startGame(container: HTMLElement) {
       // Create remote fish for everyone else
       for (const fs of result.snapshot.fish) {
         if (fs.id === result.playerId) continue;
-        const p = fs.body.pos;
-        console.info(`[main] creating RemoteFish id=${fs.id.slice(-8)} color=${fs.color} body.pos=(${p[0].toFixed(2)}, ${p[1].toFixed(2)}, ${p[2].toFixed(2)})`);
         remoteFishes.set(
           fs.id,
           createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture)
@@ -150,18 +155,15 @@ async function startGame(container: HTMLElement) {
 
     onDelta(delta: RoomDelta) {
       for (const fs of delta.updatedFish) {
-        if (fs.id === myPlayerId) {
-          continue; // skip — local Rapier world is authoritative for feel
-        }
+        // Skip local player — no server correction
+        if (fs.id === myPlayerId) continue;
+
         // Remote fish
-        const p = fs.body.pos;
         const existing = remoteFishes.get(fs.id);
         if (existing) {
-          console.info(`[main] delta update id=${fs.id.slice(-8)} body.pos=(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)}) phase=${fs.phase}`);
           updateRemoteFishState(existing, fs);
         } else {
           // New player joined — create remote fish
-          console.info(`[main] delta NEW fish id=${fs.id.slice(-8)} body.pos=(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`);
           remoteFishes.set(
             fs.id,
             createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture)
@@ -218,57 +220,60 @@ async function startGame(container: HTMLElement) {
     }
   });
 
-  // ── Game loop ──
+  // ── Game loop (fixed-timestep accumulator) ──
   const clock = new THREE.Clock();
   const _camTarget = new THREE.Vector3();
   const _camLookAt = new THREE.Vector3();
   let inputSeq = 0;
-  let frameCount = 0;
+  let physicsAccumulator = 0;
 
   function tick() {
-    const dt = Math.min(clock.getDelta(), 0.05);
+    const frameDelta = Math.min(clock.getDelta(), 0.1);
 
     if (localFish) {
-      // Build input
-      let moveX = 0;
-      let moveY = 0;
-      if (keys.has("a") || keys.has("arrowleft")) moveX = -1;
-      if (keys.has("d") || keys.has("arrowright")) moveX = 1;
-      if (keys.has("w") || keys.has("arrowup")) moveY = -1;
-      if (keys.has("s") || keys.has("arrowdown")) moveY = 1;
-      const len = Math.sqrt(moveX * moveX + moveY * moveY);
-      if (len > 0) {
-        moveX /= len;
-        moveY /= len;
-      }
-
-      const input: PlayerInput = {
-        seq: inputSeq++,
-        moveX,
-        moveY,
-        spaceDown,
-        spaceJustReleased,
-      };
-
-      // Step physics every frame for smooth visuals
+      // Update gravity in case GUI changed it
       world.gravity = { x: 0, y: FLOP.GRAVITY, z: 0 };
-      updateLocalFish(localFish, world, dt, input);
-      world.timestep = dt;
-      world.step();
-      spaceJustReleased = false;
 
-      // Feed to input sender (30Hz to server)
-      inputSender.setInput(input);
+      physicsAccumulator += frameDelta;
 
-      // Sync local fish meshes from Rapier
-      syncFishMeshes(localFish);
+      // Step physics at fixed rate — may step 0, 1, or 2 times per render frame
+      while (physicsAccumulator >= PHYSICS_DT) {
+        // Build input from current keyboard state
+        let moveX = 0;
+        let moveY = 0;
+        if (keys.has("a") || keys.has("arrowleft")) moveX = -1;
+        if (keys.has("d") || keys.has("arrowright")) moveX = 1;
+        if (keys.has("w") || keys.has("arrowup")) moveY = -1;
+        if (keys.has("s") || keys.has("arrowdown")) moveY = 1;
+        const len = Math.sqrt(moveX * moveX + moveY * moveY);
+        if (len > 0) {
+          moveX /= len;
+          moveY /= len;
+        }
 
-      // Log local fish position every 60 frames (~1/sec)
-      frameCount++;
-      if (frameCount % 60 === 0) {
-        const lp = localFish.body.translation();
-        console.info(`[main] localFish body.pos=(${lp.x.toFixed(3)}, ${lp.y.toFixed(3)}, ${lp.z.toFixed(3)}) phase=${localFish.phase}`);
+        const input: PlayerInput = {
+          seq: inputSeq++,
+          moveX,
+          moveY,
+          spaceDown,
+          spaceJustReleased,
+        };
+
+        // Step fish state machine at fixed dt (matches server exactly)
+        updateLocalFish(localFish, world, PHYSICS_DT, input);
+
+        // Step Rapier (advances by world.timestep = 1/30)
+        world.step();
+
+        spaceJustReleased = false;
+
+        // Feed to network sender
+        inputSender.setInput(input);
+
+        physicsAccumulator -= PHYSICS_DT;
       }
+      // Sync local fish meshes from Rapier (runs every render frame)
+      syncFishMeshes(localFish);
 
       // Camera follow
       const bp = localFish.body.translation();

@@ -45,7 +45,7 @@ export const FLOP = {
   MOVE_FORCE: 10,
   LAUNCH_UP: 8,
   TAIL_SLAP_DOWN: 6,
-  MAX_VELOCITY: 9,
+  MAX_VELOCITY: 12,
 
   // ── Jump charge ──
   JUMP_CHARGE_COIL: 0.3,
@@ -59,10 +59,14 @@ export const FLOP = {
 
   // ── World ──
   GRAVITY: -25,
-  GROUND_FRICTION: 0.4,
-  GROUND_RESTITUTION: 0.3,
-  FISH_FRICTION: 0.2,
-  FISH_RESTITUTION: 0.3,
+  GROUND_FRICTION: 0.6,
+  GROUND_RESTITUTION: 0.15,
+  FISH_FRICTION: 0.4,
+  FISH_RESTITUTION: 0.15,
+
+  // ── Damping ──
+  LINEAR_DAMPING: 0.5,
+  ANGULAR_DAMPING: 0.4,
 
   // ── Ground detection ──
   GROUND_RAY_LENGTH: 0.15,
