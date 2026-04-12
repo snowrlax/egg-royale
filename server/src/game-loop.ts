@@ -4,14 +4,15 @@ import { createServerFish, type ServerFish } from "./server-fish.js";
 
 const TICK_DT = 1 / 30;
 
-// Spawn positions spread across the ground
+// Spawn positions on the kitchen floor — y=8 so fish drops down from above any furniture.
+// Adjust x/z if fish still spawns inside an obstacle after the kitchen is loaded.
 const SPAWN_POSITIONS = [
-  { x: 0, y: 2, z: 0 },
-  { x: 2, y: 2, z: 0 },
-  { x: -2, y: 2, z: 0 },
-  { x: 0, y: 2, z: 2 },
-  { x: 0, y: 2, z: -2 },
-  { x: 2, y: 2, z: 2 },
+  { x:  0,  y: 8, z:  8 },
+  { x:  3,  y: 8, z:  8 },
+  { x: -3,  y: 8, z:  8 },
+  { x:  0,  y: 8, z: 12 },
+  { x:  3,  y: 8, z: 12 },
+  { x: -3,  y: 8, z: 12 },
 ];
 
 export type GameLoop = {
@@ -27,15 +28,36 @@ export function createGameLoop(): GameLoop {
   const world = new RAPIER.World({ x: 0, y: FLOP.GRAVITY, z: 0 });
   world.timestep = TICK_DT;
 
-  // Ground collider — large enough to cover kitchen at scale 5 (~35 units wide)
-  const groundDesc = RAPIER.ColliderDesc.cuboid(100, 0.15, 100)
+  // Thick slab: half-height 5 → 10 units of solid geometry, top at y=0.
+  // Prevents high-impulse fish from tunnelling through a thin plane.
+  const groundDesc = RAPIER.ColliderDesc.cuboid(100, 5, 100)
+    .setTranslation(0, -5, 0)
     .setFriction(FLOP.GROUND_FRICTION)
     .setRestitution(FLOP.GROUND_RESTITUTION)
     .setCollisionGroups(0x00010002);
   world.createCollider(groundDesc);
 
-  // Note: old edge walls removed — kitchen model provides natural boundaries.
-  // Counter/shelf colliders will be added here in the next step.
+  // Server-side box walls — approximate kitchen outer boundary at KITCHEN_SCALE=0.45.
+  // Client has exact trimesh; these just prevent fish escaping at the server level.
+  // Layout: kitchen spans roughly ±19 in X, ±17 in Z, up to ~20 in Y.
+  const WALL_GROUP = 0x00010002;
+  const wallHeight = 12;   // half-height — covers full kitchen height
+  const wallThick  = 1;    // half-thickness
+
+  const walls = [
+    { hx: wallThick, hy: wallHeight, hz: 20,        tx: -22,  ty: wallHeight, tz: 0   }, // left
+    { hx: wallThick, hy: wallHeight, hz: 20,        tx:  22,  ty: wallHeight, tz: 0   }, // right
+    { hx: 24,        hy: wallHeight, hz: wallThick, tx:  0,   ty: wallHeight, tz: -20 }, // front
+    { hx: 24,        hy: wallHeight, hz: wallThick, tx:  0,   ty: wallHeight, tz:  20 }, // back
+  ];
+
+  for (const w of walls) {
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
+        .setTranslation(w.tx, w.ty, w.tz)
+        .setCollisionGroups(WALL_GROUP)
+    );
+  }
 
   const fishMap = new Map<string, ServerFish>();
   const inputQueue = new Map<string, PlayerInput[]>();

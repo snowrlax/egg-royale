@@ -70,6 +70,8 @@ export function createGameScene(container: HTMLElement): GameScene {
   });
   const groundMesh = new THREE.Mesh(groundGeo, groundMat);
   groundMesh.receiveShadow = true;
+  // Sink below y=0 so Rapier's contact-skin overlap is hidden under the surface
+  groundMesh.position.y = -0.3;
   scene.add(groundMesh);
 
   // Resize

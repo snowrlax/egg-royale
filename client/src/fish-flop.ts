@@ -194,8 +194,10 @@ export function createFishMeshes(
 // ─────────────────────────────────────────────
 
 export function createGroundCollider(world: RAPIER.World): RAPIER.Collider {
-  // Ground extended to cover kitchen at scale 5 (~35 units wide, 30 half-extent = safe)
-  const desc = RAPIER.ColliderDesc.cuboid(30, 0.15, 30)
+  // Half-height 5 → slab is 10 units thick, top surface sits at y=0.
+  // Thick slab prevents high-impulse fish from tunnelling through a thin plane.
+  const desc = RAPIER.ColliderDesc.cuboid(30, 5, 30)
+    .setTranslation(0, -5, 0)
     .setFriction(FLOP.GROUND_FRICTION)
     .setRestitution(FLOP.GROUND_RESTITUTION)
     .setCollisionGroups(0x00010002);
@@ -225,7 +227,8 @@ export function createLocalFish(
   const headDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z - 0.55)
     .setLinearDamping(FLOP.LINEAR_DAMPING)
-    .setAngularDamping(FLOP.ANGULAR_DAMPING);
+    .setAngularDamping(FLOP.ANGULAR_DAMPING)
+    .setCcdEnabled(true);
   const headRB = world.createRigidBody(headDesc);
   const headCollDesc = RAPIER.ColliderDesc.ball(FLOP.HEAD_RADIUS)
     .setDensity(FLOP.HEAD_MASS / ((4 / 3) * Math.PI * FLOP.HEAD_RADIUS ** 3))
@@ -238,7 +241,8 @@ export function createLocalFish(
   const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z)
     .setLinearDamping(FLOP.LINEAR_DAMPING)
-    .setAngularDamping(FLOP.ANGULAR_DAMPING);
+    .setAngularDamping(FLOP.ANGULAR_DAMPING)
+    .setCcdEnabled(true);
   const bodyRB = world.createRigidBody(bodyDesc);
   const bodyVol =
     Math.PI *
@@ -258,7 +262,8 @@ export function createLocalFish(
   const tailDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z + 0.55)
     .setLinearDamping(FLOP.LINEAR_DAMPING)
-    .setAngularDamping(FLOP.ANGULAR_DAMPING);
+    .setAngularDamping(FLOP.ANGULAR_DAMPING)
+    .setCcdEnabled(true);
   const tailRB = world.createRigidBody(tailDesc);
   const tailCollDesc = RAPIER.ColliderDesc.ball(FLOP.TAIL_RADIUS)
     .setDensity(FLOP.TAIL_MASS / ((4 / 3) * Math.PI * FLOP.TAIL_RADIUS ** 3))
@@ -410,6 +415,23 @@ function clampVelocity(rb: RAPIER.RigidBody, max: number): void {
   }
 }
 
+// Multiplies horizontal (XZ) velocity by `factor` each tick to bring the fish to a stop.
+// Hard-zeros once speed drops below the deadzone threshold — prevents tiny residual
+// velocity from being amplified by a jump impulse mid-air.
+const BRAKE_DEADZONE = 0.05;
+function brakeHorizontal(fish: LocalFish, factor: number): void {
+  for (const rb of [fish.body, fish.head, fish.tail]) {
+    const v = rb.linvel();
+    const nx = v.x * factor;
+    const nz = v.z * factor;
+    const speed = Math.sqrt(nx * nx + nz * nz);
+    rb.setLinvel(
+      { x: speed < BRAKE_DEADZONE ? 0 : nx, y: v.y, z: speed < BRAKE_DEADZONE ? 0 : nz },
+      true
+    );
+  }
+}
+
 function applyFacingForce(fish: LocalFish, dt: number): void {
   const rot = fish.body.rotation();
   const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
@@ -542,6 +564,9 @@ export function updateLocalFish(
         fish.phase = "jump_charge";
         fish.phaseTime = 0;
         fish.jumpCharge = 0;
+      } else if (!hasInput && fish.grounded) {
+        // Brake: kills horizontal sliding when no key is held, factor 0.8 → stops in ~10 frames
+        brakeHorizontal(fish, 0.8);
       }
       break;
 
@@ -581,6 +606,12 @@ export function updateLocalFish(
         FLOP.SNAP_DAMPING
       );
       if (fish.phaseTime < dt * 1.5) {
+        // Zero horizontal velocity on all bodies before launching so residual
+        // sliding speed can't bleed into the flop direction mid-air
+        for (const rb of [fish.body, fish.head, fish.tail]) {
+          const v = rb.linvel();
+          rb.setLinvel({ x: 0, y: v.y, z: 0 }, true);
+        }
         const fx = Math.sin(fish.facingAngle) * FLOP.MOVE_FORCE;
         const fz = Math.cos(fish.facingAngle) * FLOP.MOVE_FORCE;
         fish.body.applyImpulse({ x: fx, y: FLOP.LAUNCH_UP, z: fz }, true);

@@ -61,15 +61,16 @@ async function startGame(container: HTMLElement) {
   // ── Scene ──
   const gameScene = createGameScene(container);
 
-  // ── Kitchen — fire and forget (no loading screen) ──
-  // Check the browser console for "[kitchen] natural size" after it loads
-  loadKitchen(gameScene.scene).catch(console.error);
-
   // ── Local Rapier world (client prediction) ──
+  // Must be created before loadKitchen so we can pass it for trimesh colliders
   const PHYSICS_DT = 1 / 30;
   const world = new RAPIER.World({ x: 0, y: FLOP.GRAVITY, z: 0 });
   world.timestep = PHYSICS_DT;
   createGroundCollider(world);
+
+  // ── Kitchen — fire and forget (no loading screen) ──
+  // Passes world so kitchen meshes become Rapier trimesh colliders
+  loadKitchen(gameScene.scene, world).catch(console.error);
 
   // ── Camera config (tunable via GUI) ──
   const CAM = { distance: 16, height: 10, smoothness: 0.05, mouseSensitivity: 0.005, rotateSpeed: 1.5 };
@@ -275,8 +276,8 @@ async function startGame(container: HTMLElement) {
         // WASD movement relative to camera angle
         // Camera forward = (sin, 0, cos), camera right = (cos, 0, -sin)
         let fwd = 0, strafe = 0;
-        if (keys.has("w") || keys.has("arrowup"))    fwd    =  1;
-        if (keys.has("s") || keys.has("arrowdown"))  fwd    = -1;
+        if (keys.has("w") || keys.has("arrowup"))    fwd    = -1;
+        if (keys.has("s") || keys.has("arrowdown"))  fwd    =  1;
         if (keys.has("a") || keys.has("arrowleft"))  strafe = -1;
         if (keys.has("d") || keys.has("arrowright")) strafe =  1;
 
