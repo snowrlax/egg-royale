@@ -8,7 +8,8 @@
       "Bash(lsof -ti:3001)",
       "Bash(xargs kill:*)",
       "Bash(node -e \"import\\('@dimforge/rapier3d/rapier.js'\\).then\\(m => console.log\\('init' in m.default ? 'has init' : 'no init'\\)\\)\")",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "WebSearch"
     ]
   }
 }
