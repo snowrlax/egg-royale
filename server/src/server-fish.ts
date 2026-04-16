@@ -35,6 +35,20 @@ function clampVelocity(rb: RAPIER.RigidBody, max: number): void {
   }
 }
 
+const BRAKE_DEADZONE = 0.05;
+function brakeHorizontal(fish: ServerFish, factor: number): void {
+  for (const rb of [fish.body, fish.head, fish.tail]) {
+    const v = rb.linvel();
+    const nx = v.x * factor;
+    const nz = v.z * factor;
+    const speed = Math.sqrt(nx * nx + nz * nz);
+    rb.setLinvel(
+      { x: speed < BRAKE_DEADZONE ? 0 : nx, y: v.y, z: speed < BRAKE_DEADZONE ? 0 : nz },
+      true
+    );
+  }
+}
+
 function checkGrounded(
   bodyRB: RAPIER.RigidBody,
   world: RAPIER.World
@@ -425,6 +439,8 @@ function stepFish(
         fish.phase = "jump_charge";
         fish.phaseTime = 0;
         fish.jumpCharge = 0;
+      } else if (!hasInput && fish.grounded) {
+        brakeHorizontal(fish, 0.8);
       }
       break;
 
@@ -444,6 +460,11 @@ function stepFish(
       setMotor(fish.headJoint, s * FLOP.SNAP_HEAD_ANGLE, FLOP.SNAP_STIFFNESS, FLOP.SNAP_DAMPING);
       setMotor(fish.tailJoint, -s * FLOP.SNAP_TAIL_ANGLE, FLOP.SNAP_STIFFNESS, FLOP.SNAP_DAMPING);
       if (fish.phaseTime < dt * 1.5) {
+        // Zero horizontal velocity before launching so residual sliding can't bleed into flop direction
+        for (const rb of [fish.body, fish.head, fish.tail]) {
+          const v = rb.linvel();
+          rb.setLinvel({ x: 0, y: v.y, z: 0 }, true);
+        }
         const fx = Math.sin(fish.facingAngle) * FLOP.MOVE_FORCE;
         const fz = Math.cos(fish.facingAngle) * FLOP.MOVE_FORCE;
         fish.body.applyImpulse({ x: fx, y: FLOP.LAUNCH_UP, z: fz }, true);
