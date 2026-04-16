@@ -4,7 +4,8 @@
   "workspaces": [
     "packages/*",
     "server",
-    "client"
+    "client",
+    "chained/client"
   ],
   "scripts": {
     "dev:server": "npm run dev -w server",
