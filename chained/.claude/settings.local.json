@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "WebFetch(domain:discourse.threejs.org)"
+      "WebFetch(domain:discourse.threejs.org)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

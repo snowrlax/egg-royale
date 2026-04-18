@@ -3,6 +3,8 @@ import { createScene } from "./scene";
 import { loadSteve } from "./character";
 import { createInput } from "./input";
 import { createController, WALK_SPEED, RUN_SPEED } from "./controller";
+import { createPhysics } from "./physics";
+import { createRagdoll } from "./ragdoll";
 
 const CAMERA_OFFSET = new THREE.Vector3(0, 6, 8);
 
@@ -16,12 +18,14 @@ function pickAnimation(speed: number, airborne: boolean): { name: string; timeSc
 
 async function main() {
     const { scene, camera, renderer } = await createScene();
+    const physics = await createPhysics();
 
     const steve = await loadSteve();
     scene.add(steve.object);
 
     const input = createInput();
     const controller = createController(steve.object, input);
+    const ragdoll = createRagdoll(physics, steve, scene);
 
     let currentName = "Idle";
     const cameraTarget = new THREE.Vector3();
@@ -29,7 +33,10 @@ async function main() {
     const clock = new THREE.Clock();
     function animate() {
         requestAnimationFrame(animate);
-        const dt = clock.getDelta();
+        // Cap dt at 1/30s. When the tab is backgrounded, requestAnimationFrame pauses;
+        // the next frame's dt would otherwise be the full pause duration (seconds → minutes),
+        // sending gravity & physics into a giant single-step explosion.
+        const dt = Math.min(clock.getDelta(), 1 / 30);
 
         const { speed, airborne } = controller.update(dt);
         const { name, timeScale } = pickAnimation(speed, airborne);
@@ -40,7 +47,8 @@ async function main() {
         }
         steve.actions[name].timeScale = timeScale;
 
-        steve.update(dt);
+        steve.update(dt);  // animation writes bones
+        ragdoll.update();  // physics steps + debug viz updates
 
         cameraTarget.copy(steve.object.position);
         camera.position.copy(cameraTarget).add(CAMERA_OFFSET);
