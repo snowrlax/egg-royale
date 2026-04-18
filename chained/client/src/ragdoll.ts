@@ -7,54 +7,59 @@ export type Ragdoll = {
 };
 
 const tmpVec = new THREE.Vector3();
+const tmpQuat = new THREE.Quaternion();
+const tmpQuat2 = new THREE.Quaternion();
 
-// Phase A: prove the binding loop with one dangling body near the left elbow.
-// No bones overridden yet — a debug sphere visualizes the physics result.
-export function createRagdoll(physics: Physics, character: Character, scene: THREE.Scene): Ragdoll {
+// Phase B: physics drives the actual LowerArmL bone (no debug sphere).
+// Loop order: animation writes bones → we read them → step physics → overwrite bone with physics result.
+export function createRagdoll(physics: Physics, character: Character, _scene: THREE.Scene): Ragdoll {
     const { world, RAPIER } = physics;
 
-    // Note: Three.js strips dots from bone names (PropertyBinding uses "." as a separator),
-    // so the GLB's "UpperArm.L" becomes "UpperArmL" at runtime.
+    // Three.js strips dots from bone names — see character.ts log.
     const upperArmL = character.bones["UpperArmL"];
     const lowerArmL = character.bones["LowerArmL"];
     if (!upperArmL || !lowerArmL) {
         throw new Error("Required bones missing: UpperArmL, LowerArmL");
     }
 
-    // Spawn-time world positions of the shoulder (UpperArm origin) and elbow (LowerArm origin).
+    // Spawn-time world transforms (bind pose — mixer hasn't run yet).
     character.object.updateMatrixWorld(true);
     const shoulderPos = upperArmL.getWorldPosition(new THREE.Vector3());
+    const upperArmQuat = upperArmL.getWorldQuaternion(new THREE.Quaternion());
     const elbowPos = lowerArmL.getWorldPosition(new THREE.Vector3());
+    const lowerArmQuat = lowerArmL.getWorldQuaternion(new THREE.Quaternion());
 
-    // ── Anchor: kinematic body at the shoulder ──
-    // Each frame we set its target translation to UpperArm.L's current world position.
-    // Infinite mass → it never moves under forces, only under our explicit set.
+    // ── Anchor: kinematic body matched to UpperArmL's full transform ──
     const anchorBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.kinematicPositionBased()
             .setTranslation(shoulderPos.x, shoulderPos.y, shoulderPos.z)
+            .setRotation({ x: upperArmQuat.x, y: upperArmQuat.y, z: upperArmQuat.z, w: upperArmQuat.w })
     );
 
-    // ── Dynamic body: hangs from a spherical joint at the elbow ──
-    // Body origin sits at the elbow (= joint anchor). Collider is offset DOWN from the
-    // origin so the center of mass is below the pivot — gravity creates a pendulum torque.
+    // ── Dynamic body: rotation must match the bone's world rotation at spawn ──
+    // (otherwise we get a constant offset between body and bone forever)
     const armBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
             .setTranslation(elbowPos.x, elbowPos.y, elbowPos.z)
+            .setRotation({ x: lowerArmQuat.x, y: lowerArmQuat.y, z: lowerArmQuat.z, w: lowerArmQuat.w })
             .setLinearDamping(0.3)
             .setAngularDamping(2.0)
     );
+    // Collider offset DOWN the body's local Y, putting center of mass below the joint pivot
+    // → gravity creates pendulum torque around the elbow.
     world.createCollider(
-        RAPIER.ColliderDesc.ball(0.1)
+        RAPIER.ColliderDesc.ball(0.08)
             .setTranslation(0, -0.25, 0)
             .setDensity(1.0),
         armBody
     );
 
     // ── Spherical joint at the elbow ──
-    // Anchor frames are LOCAL to each body:
-    //   - On anchor body (origin = shoulder): elbow offset = elbow_world − shoulder_world
-    //   - On arm body (origin = elbow):       (0, 0, 0)
-    const elbowInAnchor = elbowPos.clone().sub(shoulderPos);
+    // Anchor frames are LOCAL to each body. Compute elbow offset in upperArm's local frame
+    // by inverse-rotating the world delta through the upperArm's world quaternion.
+    const elbowWorldDelta = elbowPos.clone().sub(shoulderPos);
+    const elbowInAnchor = elbowWorldDelta.clone().applyQuaternion(upperArmQuat.clone().invert());
+
     world.createImpulseJoint(
         RAPIER.JointData.spherical(
             { x: elbowInAnchor.x, y: elbowInAnchor.y, z: elbowInAnchor.z },
@@ -63,35 +68,26 @@ export function createRagdoll(physics: Physics, character: Character, scene: THR
         anchorBody, armBody, true
     );
 
-    // ── Debug visualization ──
-    // Group at body's world transform; sphere child offset to where the collider is.
-    // depthTest=false so we can see it through Steve's body.
-    const debugAnchor = new THREE.Object3D();
-    const debugSphere = new THREE.Mesh(
-        new THREE.SphereGeometry(0.1, 12, 8),
-        new THREE.MeshBasicNodeMaterial({ color: 0xff3333 })
-    );
-    debugSphere.position.set(0, -0.25, 0);
-    debugSphere.renderOrder = 999;
-    debugSphere.material.depthTest = false;
-    debugAnchor.add(debugSphere);
-    scene.add(debugAnchor);
-
     return {
         update() {
-            // 1. Sync kinematic anchor to UpperArm.L's current world position
+            // 1. Refresh world matrices so we read up-to-date bone transforms (mixer just wrote)
             character.object.updateMatrixWorld(true);
+
+            // 2. Sync kinematic anchor's full transform to UpperArmL's current world transform
             upperArmL.getWorldPosition(tmpVec);
             anchorBody.setNextKinematicTranslation({ x: tmpVec.x, y: tmpVec.y, z: tmpVec.z });
+            upperArmL.getWorldQuaternion(tmpQuat);
+            anchorBody.setNextKinematicRotation({ x: tmpQuat.x, y: tmpQuat.y, z: tmpQuat.z, w: tmpQuat.w });
 
-            // 2. Step physics one tick (~1/60s default)
+            // 3. Step physics one tick
             world.step();
 
-            // 3. Visualize body transform — sphere swings below the body origin
-            const t = armBody.translation();
+            // 4. Convert body world rotation → bone parent-local rotation, write to bone
+            //    bone.quaternion = parent.worldQuat⁻¹ × body.worldQuat
             const r = armBody.rotation();
-            debugAnchor.position.set(t.x, t.y, t.z);
-            debugAnchor.quaternion.set(r.x, r.y, r.z, r.w);
+            tmpQuat.set(r.x, r.y, r.z, r.w);
+            lowerArmL.parent!.getWorldQuaternion(tmpQuat2);
+            lowerArmL.quaternion.copy(tmpQuat2).invert().multiply(tmpQuat);
         },
     };
 }
