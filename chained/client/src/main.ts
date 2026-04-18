@@ -2,11 +2,17 @@ import * as THREE from "three/webgpu";
 import { createScene } from "./scene";
 import { loadSteve } from "./character";
 import { createInput } from "./input";
-import { createController } from "./controller";
+import { createController, WALK_SPEED, RUN_SPEED } from "./controller";
 
-// BombSquad-style: camera sits at a fixed offset above + behind the world,
-// follows Steve's position but never rotates. Players orient by world axes.
 const CAMERA_OFFSET = new THREE.Vector3(0, 6, 8);
+
+// State machine: gameplay state (speed + airborne) → which animation + how fast
+function pickAnimation(speed: number, airborne: boolean): { name: string; timeScale: number } {
+    if (airborne) return { name: "Jump_Idle", timeScale: 1 };
+    if (speed === 0) return { name: "Idle", timeScale: 1 };
+    if (speed <= WALK_SPEED + 0.01) return { name: "Walk", timeScale: speed / WALK_SPEED };
+    return { name: "Run", timeScale: speed / RUN_SPEED };
+}
 
 async function main() {
     const { scene, camera, renderer } = await createScene();
@@ -17,7 +23,7 @@ async function main() {
     const input = createInput();
     const controller = createController(steve.object, input);
 
-    let wasMoving = false;
+    let currentName = "Idle";
     const cameraTarget = new THREE.Vector3();
 
     const clock = new THREE.Clock();
@@ -25,14 +31,17 @@ async function main() {
         requestAnimationFrame(animate);
         const dt = clock.getDelta();
 
-        const moving = controller.update(dt);
-        if (moving !== wasMoving) {
-            steve.play(moving ? "Walk" : "Idle");
-            wasMoving = moving;
+        const { speed, airborne } = controller.update(dt);
+        const { name, timeScale } = pickAnimation(speed, airborne);
+
+        if (name !== currentName) {
+            steve.play(name);
+            currentName = name;
         }
+        steve.actions[name].timeScale = timeScale;
+
         steve.update(dt);
 
-        // Follow camera: fixed offset, look at Steve's torso (~1 unit up)
         cameraTarget.copy(steve.object.position);
         camera.position.copy(cameraTarget).add(CAMERA_OFFSET);
         cameraTarget.y += 1;
