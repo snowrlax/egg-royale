@@ -8,10 +8,21 @@
       * { margin: 0; padding: 0; box-sizing: border-box; }
       html, body { width: 100%; height: 100%; overflow: hidden; }
       #app { width: 100%; height: 100%; }
+      #hud {
+        position: fixed; top: 12px; left: 12px;
+        font: 13px/1.5 monospace; color: #fff;
+        background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 6px;
+        pointer-events: none; user-select: none;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <div id="hud">
+      <strong>Animations</strong><br/>
+      1 Idle &middot; 2 Walk &middot; 3 Run &middot; 4 Jump &middot; 5 Punch<br/>
+      6 Wave &middot; 7 HitReact &middot; 8 Death &middot; 9 Duck
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
