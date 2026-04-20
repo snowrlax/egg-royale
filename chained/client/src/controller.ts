@@ -1,5 +1,10 @@
 import * as THREE from "three/webgpu";
 import type { InputState } from "./input";
+import {
+    PLATFORM_TOP_Y,
+    FALL_THRESHOLD,
+    isOverPlatform,
+} from "./arena";
 
 export const WALK_SPEED = 2.5;
 export const RUN_SPEED = 5.5;
@@ -8,15 +13,16 @@ const MODEL_FACING_OFFSET = 0;
 
 const GRAVITY = -25;          // units / sec²  (down)
 const JUMP_VELOCITY = 8;      // units / sec   (up, at takeoff)
-const GROUND_Y = 0;
 
 export type ControllerState = {
     speed: number;       // horizontal speed, units/sec (0 if stopped)
-    airborne: boolean;   // off the ground
+    airborne: boolean;   // off the ground (not on the platform right now)
+    fallen: boolean;     // dropped far enough below the platform to count as KO'd
 };
 
 export type Controller = {
     update: (deltaSeconds: number) => ControllerState;
+    respawn: (spawn: THREE.Vector3) => void;
 };
 
 export function createController(target: THREE.Object3D, input: InputState): Controller {
@@ -47,19 +53,28 @@ export function createController(target: THREE.Object3D, input: InputState): Con
                 target.quaternion.slerp(targetQuat, Math.min(1, TURN_SPEED * dt));
             }
 
-            // ── Vertical (gravity + jump) ──
-            const grounded = target.position.y <= GROUND_Y;
+            // ── Vertical (gravity + jump, gated by being over the platform) ──
+            const overPlatform = isOverPlatform(target.position.x, target.position.z);
+            const grounded = overPlatform && target.position.y <= PLATFORM_TOP_Y;
             if (grounded) {
-                target.position.y = GROUND_Y;
+                target.position.y = PLATFORM_TOP_Y;
                 verticalVel = 0;
-                // Rising edge: only on the frame Space was just pressed
                 if (input.jump && !prevJump) verticalVel = JUMP_VELOCITY;
             }
             verticalVel += GRAVITY * dt;
             target.position.y += verticalVel * dt;
             prevJump = input.jump;
 
-            return { speed, airborne: target.position.y > GROUND_Y + 0.001 };
+            const airborne = !grounded;
+            const fallen = target.position.y < PLATFORM_TOP_Y - FALL_THRESHOLD;
+
+            return { speed, airborne, fallen };
+        },
+        respawn(spawn) {
+            target.position.copy(spawn);
+            target.quaternion.identity();
+            verticalVel = 0;
+            prevJump = false;
         },
     };
 }

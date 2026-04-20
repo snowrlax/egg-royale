@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 export type Character = {
     object: THREE.Object3D;
+    bones: Record<string, THREE.Bone>;
     actions: Record<string, THREE.AnimationAction>;
     play: (name: string, fadeSeconds?: number) => void;
     update: (deltaSeconds: number) => void;
@@ -11,6 +12,12 @@ export type Character = {
 export async function loadSteve(url = "/models/Steve.glb"): Promise<Character> {
     const gltf = await new GLTFLoader().loadAsync(url);
     const object = gltf.scene;
+
+    // Three.js strips dots from bone names, so "UpperArm.L" becomes "UpperArmL".
+    const bones: Record<string, THREE.Bone> = {};
+    object.traverse((o) => {
+        if ((o as THREE.Bone).isBone) bones[o.name] = o as THREE.Bone;
+    });
 
     const mixer = new THREE.AnimationMixer(object);
     const actions: Record<string, THREE.AnimationAction> = {};
@@ -34,6 +41,7 @@ export async function loadSteve(url = "/models/Steve.glb"): Promise<Character> {
 
     return {
         object,
+        bones,
         actions,
         play,
         update: (deltaSeconds) => mixer.update(deltaSeconds),

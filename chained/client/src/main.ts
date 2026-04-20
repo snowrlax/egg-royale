@@ -3,10 +3,11 @@ import { createScene } from "./scene";
 import { loadSteve } from "./character";
 import { createInput } from "./input";
 import { createController, WALK_SPEED, RUN_SPEED } from "./controller";
+import { createPhysics } from "./physics";
+import { PLAYER_SPAWN } from "./arena";
 
 const CAMERA_OFFSET = new THREE.Vector3(0, 6, 8);
 
-// State machine: gameplay state (speed + airborne) → which animation + how fast
 function pickAnimation(speed: number, airborne: boolean): { name: string; timeScale: number } {
     if (airborne) return { name: "Jump_Idle", timeScale: 1 };
     if (speed === 0) return { name: "Idle", timeScale: 1 };
@@ -17,7 +18,12 @@ function pickAnimation(speed: number, airborne: boolean): { name: string; timeSc
 async function main() {
     const { scene, camera, renderer } = await createScene();
 
+    // Physics world is the source of truth for the platform collider.
+    // Not stepped this phase — reserved for Phase 2 (pushing / ragdoll).
+    await createPhysics();
+
     const steve = await loadSteve();
+    steve.object.position.copy(PLAYER_SPAWN);
     scene.add(steve.object);
 
     const input = createInput();
@@ -31,8 +37,10 @@ async function main() {
         requestAnimationFrame(animate);
         const dt = clock.getDelta();
 
-        const { speed, airborne } = controller.update(dt);
-        const { name, timeScale } = pickAnimation(speed, airborne);
+        const state = controller.update(dt);
+        if (state.fallen) controller.respawn(PLAYER_SPAWN);
+
+        const { name, timeScale } = pickAnimation(state.speed, state.airborne);
 
         if (name !== currentName) {
             steve.play(name);

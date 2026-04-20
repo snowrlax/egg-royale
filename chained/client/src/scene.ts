@@ -1,14 +1,20 @@
 import * as THREE from "three/webgpu";
+import {
+    PLATFORM_HALF_X,
+    PLATFORM_HALF_Y,
+    PLATFORM_HALF_Z,
+    PLATFORM_CENTER_Y,
+} from "./arena";
 
 export async function createScene() {
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x202020);
+    scene.background = new THREE.Color(0x0a0a0f);
 
     const camera = new THREE.PerspectiveCamera(
         75,
         window.innerWidth / window.innerHeight,
         0.1,
-        100
+        200
     );
     camera.position.set(0, 3, 6);
 
@@ -20,13 +26,18 @@ export async function createScene() {
     const light = new THREE.DirectionalLight(0xffffff, 1);
     light.position.set(5, 10, 5);
     scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
-    const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(20, 20),
-        new THREE.MeshStandardNodeMaterial({ color: 0x444444 })
+    const platform = new THREE.Mesh(
+        new THREE.BoxGeometry(
+            PLATFORM_HALF_X * 2,
+            PLATFORM_HALF_Y * 2,
+            PLATFORM_HALF_Z * 2
+        ),
+        new THREE.MeshStandardNodeMaterial({ color: 0xb58a4a })
     );
-    floor.rotation.x = -Math.PI / 2;
-    scene.add(floor);
+    platform.position.y = PLATFORM_CENTER_Y;
+    scene.add(platform);
 
     return { scene, camera, renderer };
 }
