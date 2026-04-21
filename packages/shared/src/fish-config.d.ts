@@ -45,6 +45,15 @@ export declare const FLOP: {
     LINEAR_DAMPING: number;
     ANGULAR_DAMPING: number;
     GROUND_RAY_LENGTH: number;
+    CUBE_MOVE_SPEED: number;
+    CUBE_AIR_CONTROL: number;
+    CUBE_DAMPING: number;
+    CUBE_GROUNDED_RAY: number;
+    CUBE_GROUNDED_MARGIN: number;
+    CUBE_JUMP_MIN_CHARGE: number;
+    CUBE_JUMP_MAX_CHARGE: number;
+    CUBE_JUMP_BASE: number;
+    CUBE_JUMP_BONUS: number;
     PLAYER_MASS: number;
     PLAYER_FRICTION: number;
     PLAYER_RESTITUTION: number;

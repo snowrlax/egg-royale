@@ -110,11 +110,7 @@ export function createGameLoop(callbacks: GameLoopCallbacks = {}): GameLoop {
         queue.length = 0; // Drain remaining
 
         if (input) {
-          applyInput(entity, input, TICK_DT);
-          // Only log when inputs have movement (reduces spam)
-          if (Math.abs(input.moveX) > 0.01 || Math.abs(input.moveY) > 0.01) {
-            console.log(`[GAME-LOOP] ${playerId.slice(-8)} moveX=${input.moveX.toFixed(2)}, moveY=${input.moveY.toFixed(2)}`);
-          }
+          applyInput(entity, input, TICK_DT, world);
         }
       }
 
@@ -147,11 +143,6 @@ export function createGameLoop(callbacks: GameLoopCallbacks = {}): GameLoop {
 
       if (updatedFish.length === 0 && eliminated.length === 0) {
         return null;
-      }
-
-      // Log delta summary every second (30 ticks) to reduce spam
-      if (tick % 30 === 0) {
-        console.log(`[GAME-LOOP] tick=${tick}, fish=${updatedFish.length}`);
       }
 
       return {

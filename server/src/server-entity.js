@@ -6,11 +6,11 @@ import { FLOP } from "@fish-jam/shared";
 const PLAYER_COLLISION_GROUP = 0x00020003;
 export function createServerEntity(playerId, world, spawnPos, color) {
     // Create rigid body (dynamic)
-    // Use same damping as client (5.0) for tight, responsive movement
+    // Use shared damping constant for consistency with client
     const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z)
-        .setLinearDamping(5.0) // Match client (fish-flop.ts line 140)
-        .setAngularDamping(5.0) // Match client (fish-flop.ts line 141)
+        .setLinearDamping(FLOP.CUBE_DAMPING)
+        .setAngularDamping(FLOP.CUBE_DAMPING)
         .setCcdEnabled(true); // Prevent tunneling at high speeds
     const body = world.createRigidBody(bodyDesc);
     // Create collider (cube for now, matching client)
@@ -29,10 +29,15 @@ export function createServerEntity(playerId, world, spawnPos, color) {
         eliminated: false,
     };
 }
-// Match client constants (fish-flop.ts lines 52-53)
-const CUBE_MOVE_SPEED = 6.0;
-const CUBE_AIR_CONTROL = 0.3;
-export function applyInput(entity, input, dt) {
+// Grounded check using raycast (matches client fish-flop.ts checkGrounded)
+function checkGrounded(body, world) {
+    const pos = body.translation();
+    const ray = new RAPIER.Ray({ x: pos.x, y: pos.y, z: pos.z }, { x: 0, y: -1, z: 0 });
+    // Cube half-height is 0.5, raycast slightly beyond
+    const hit = world.castRay(ray, FLOP.CUBE_GROUNDED_RAY, true, undefined, undefined, undefined, body);
+    return hit !== null;
+}
+export function applyInput(entity, input, dt, world) {
     if (entity.eliminated)
         return;
     const body = entity.body;
@@ -46,11 +51,11 @@ export function applyInput(entity, input, dt) {
         moveY /= moveLen;
     }
     const hasInput = moveLen > 0.1;
-    // Simplified grounded check (low Y velocity = on ground)
-    const grounded = Math.abs(v.y) < 0.5;
+    // Raycast grounded check (matches client)
+    const grounded = checkGrounded(body, world);
     // Direct velocity control - matches client (fish-flop.ts lines 251-258)
     if (hasInput) {
-        const speed = grounded ? CUBE_MOVE_SPEED : CUBE_MOVE_SPEED * CUBE_AIR_CONTROL;
+        const speed = grounded ? FLOP.CUBE_MOVE_SPEED : FLOP.CUBE_MOVE_SPEED * FLOP.CUBE_AIR_CONTROL;
         body.setLinvel({ x: moveX * speed, y: v.y, z: moveY * speed }, true);
     }
     else if (grounded) {

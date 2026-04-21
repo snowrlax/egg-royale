@@ -46,18 +46,14 @@ export type LocalFish = {
 };
 
 // ─────────────────────────────────────────────
-// CUBE MOVEMENT CONSTANTS
+// CUBE MOVEMENT CONSTANTS (from shared package)
 // ─────────────────────────────────────────────
-
-const CUBE_MOVE_SPEED = 6.0;      // Direct velocity (not force)
-const CUBE_AIR_CONTROL = 0.3;     // Air control multiplier
-
-// Spring jump (charged jump) constants
-const CUBE_JUMP_MIN_CHARGE = 0.05;   // 50ms minimum to trigger jump
-const CUBE_JUMP_MAX_CHARGE = 0.5;    // 500ms max charge time
-const CUBE_JUMP_BASE = 6.0;          // Minimum jump impulse (tap)
-const CUBE_JUMP_BONUS = 6.0;         // Extra impulse at full charge
-// Total range: 6.0 (tap) to 12.0 (full charge)
+// All cube movement constants are now centralized in FLOP:
+// - FLOP.CUBE_MOVE_SPEED
+// - FLOP.CUBE_AIR_CONTROL
+// - FLOP.CUBE_DAMPING
+// - FLOP.CUBE_GROUNDED_RAY
+// - FLOP.CUBE_JUMP_*
 
 // No-op stub for model loading (cube doesn't need a model)
 export async function loadFishModel(_url: string): Promise<void> {
@@ -137,8 +133,8 @@ export function createLocalFish(
   // Single rigid body for cube - high damping for tight control
   const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z)
-    .setLinearDamping(5.0)   // High damping to stop quickly
-    .setAngularDamping(5.0)  // High angular damping
+    .setLinearDamping(FLOP.CUBE_DAMPING)
+    .setAngularDamping(FLOP.CUBE_DAMPING)
     .setCcdEnabled(true);
   const bodyRB = world.createRigidBody(bodyDesc);
 
@@ -210,10 +206,10 @@ function checkGrounded(bodyRB: RAPIER.RigidBody, world: RAPIER.World): boolean {
     { x: bpos.x, y: bpos.y, z: bpos.z },
     { x: 0, y: -1, z: 0 }
   );
-  // Cube half-height is 0.5, so check 0.5 + small margin
+  // Cube half-height is 0.5, raycast slightly beyond (uses shared constant)
   const hit = world.castRay(
     ray,
-    0.6,
+    FLOP.CUBE_GROUNDED_RAY,
     true,
     undefined,
     undefined,
@@ -250,7 +246,7 @@ export function updateLocalFish(
   // Movement (works during charge too)
   if (hasInput) {
     // Direct velocity control - no momentum buildup
-    const speed = fish.grounded ? CUBE_MOVE_SPEED : CUBE_MOVE_SPEED * CUBE_AIR_CONTROL;
+    const speed = fish.grounded ? FLOP.CUBE_MOVE_SPEED : FLOP.CUBE_MOVE_SPEED * FLOP.CUBE_AIR_CONTROL;
     fish.body.setLinvel({ x: moveX * speed, y: v.y, z: moveY * speed }, true);
   } else if (fish.grounded) {
     // Instant stop when no input (preserve Y for gravity)
@@ -266,13 +262,13 @@ export function updateLocalFish(
     }
   } else if (fish.phase === "jump_charge") {
     // Accumulate charge while space held
-    fish.jumpCharge = Math.min(fish.jumpCharge + dt, CUBE_JUMP_MAX_CHARGE);
+    fish.jumpCharge = Math.min(fish.jumpCharge + dt, FLOP.CUBE_JUMP_MAX_CHARGE);
 
     // Release jump on space release
     if (input.spaceJustReleased) {
-      if (fish.jumpCharge >= CUBE_JUMP_MIN_CHARGE && fish.grounded) {
-        const chargeRatio = fish.jumpCharge / CUBE_JUMP_MAX_CHARGE;
-        const impulse = CUBE_JUMP_BASE + chargeRatio * CUBE_JUMP_BONUS;
+      if (fish.jumpCharge >= FLOP.CUBE_JUMP_MIN_CHARGE && fish.grounded) {
+        const chargeRatio = fish.jumpCharge / FLOP.CUBE_JUMP_MAX_CHARGE;
+        const impulse = FLOP.CUBE_JUMP_BASE + chargeRatio * FLOP.CUBE_JUMP_BONUS;
         fish.body.applyImpulse({ x: 0, y: impulse, z: 0 }, true);
       }
       fish.phase = "idle";
