@@ -45,5 +45,9 @@ export declare const FLOP: {
     LINEAR_DAMPING: number;
     ANGULAR_DAMPING: number;
     GROUND_RAY_LENGTH: number;
+    PLAYER_MASS: number;
+    PLAYER_FRICTION: number;
+    PLAYER_RESTITUTION: number;
+    FALL_THRESHOLD: number;
 };
 export type FlopConfig = typeof FLOP;

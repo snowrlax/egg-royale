@@ -9,13 +9,13 @@ import {
 } from "@fish-jam/shared";
 
 import { createGameScene } from "./scene.js";
-import { loadKitchen } from "./kitchen.js";
 import {
   loadFishModel,
   createLocalFish,
   createGroundCollider,
   updateLocalFish,
   syncFishMeshes,
+  checkFishFallen,
   type LocalFish,
 } from "./fish-flop.js";
 import {
@@ -54,36 +54,39 @@ async function boot() {
 }
 
 async function startGame(container: HTMLElement) {
-  // ── Load fish model ──
+  /* ══════════════════════════════════════════════════════════════
+   * FISH CODE - PRESERVED FOR LATER
+   * Load fish GLB model
+   * ══════════════════════════════════════════════════════════════
   const modelUrl = new URL("../models/fish.glb", import.meta.url).href;
   await loadFishModel(modelUrl);
+   * ══════════════════════════════════════════════════════════════ */
 
   // ── Scene ──
   const gameScene = createGameScene(container);
 
   // ── Local Rapier world (client prediction) ──
-  // Must be created before loadKitchen so we can pass it for trimesh colliders
   const PHYSICS_DT = 1 / 30;
   const world = new RAPIER.World({ x: 0, y: FLOP.GRAVITY, z: 0 });
   world.timestep = PHYSICS_DT;
   createGroundCollider(world);
-
-  // ── Kitchen — fire and forget (no loading screen) ──
-  // Passes world so kitchen meshes become Rapier trimesh colliders
-  loadKitchen(gameScene.scene, world).catch(console.error);
 
   // ── Camera config (tunable via GUI) ──
   const CAM = { distance: 16, height: 10, smoothness: 0.05, mouseSensitivity: 0.005, rotateSpeed: 1.5 };
   let camAngle = 0; // radians — orbit angle around fish
 
   // ── Tweaking GUI ──
-  const gui = new GUI({ title: "Fish Tuning" });
+  const gui = new GUI({ title: "Cube Tuning" });
 
   const worldFolder = gui.addFolder("World");
   worldFolder.add(FLOP, "GRAVITY", -60, 0, 0.5).name("Gravity");
   worldFolder.add(FLOP, "GROUND_FRICTION", 0, 2, 0.05).name("Ground Friction");
   worldFolder.add(FLOP, "GROUND_RESTITUTION", 0, 1, 0.05).name("Ground Bounce");
 
+  /* ══════════════════════════════════════════════════════════════
+   * FISH CODE - PRESERVED FOR LATER
+   * Fish-specific GUI folders
+   * ══════════════════════════════════════════════════════════════
   const moveFolder = gui.addFolder("Movement");
   moveFolder.add(FLOP, "MOVE_FORCE", 1, 30, 0.5).name("Move Force");
   moveFolder.add(FLOP, "LAUNCH_UP", 0, 20, 0.5).name("Launch Up");
@@ -107,6 +110,7 @@ async function startGame(container: HTMLElement) {
   steerFolder.add(FLOP, "RECOVERY_TORQUE", 1, 50, 1).name("Recovery Torque");
   steerFolder.add(FLOP, "FACING_TORQUE", 1, 40, 1).name("Facing Torque");
   steerFolder.add(FLOP, "FACING_DAMPING", 1, 20, 0.5).name("Facing Damping");
+   * ══════════════════════════════════════════════════════════════ */
 
   const camFolder = gui.addFolder("Camera");
   camFolder.add(CAM, "distance", 4, 40, 0.5).name("Zoom (distance)");
@@ -119,6 +123,36 @@ async function startGame(container: HTMLElement) {
   let localFish: LocalFish | null = null;
   let myPlayerId: string | null = null;
   const remoteFishes = new Map<string, RemoteFish>();
+  let isGameOver = false;
+  let isEliminated = false;
+
+  // ── Game Over overlay ──
+  const gameOverOverlay = document.createElement("div");
+  gameOverOverlay.style.cssText =
+    "position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;background:rgba(0,0,0,0.7);z-index:20;";
+  const gameOverText = document.createElement("div");
+  gameOverText.textContent = "GAME OVER";
+  gameOverText.style.cssText =
+    "font:bold 48px monospace;color:#ff4444;margin-bottom:20px;";
+  const restartBtn = document.createElement("button");
+  restartBtn.textContent = "Play Again";
+  restartBtn.style.cssText =
+    "font:bold 20px monospace;padding:12px 32px;cursor:pointer;border:2px solid #fff;border-radius:8px;background:#ff8c42;color:#fff;";
+  gameOverOverlay.appendChild(gameOverText);
+  gameOverOverlay.appendChild(restartBtn);
+  container.appendChild(gameOverOverlay);
+
+  restartBtn.addEventListener("click", () => {
+    window.location.reload();
+  });
+
+  function showGameOverOverlay(message: string, isWin: boolean) {
+    gameOverText.textContent = message;
+    gameOverText.style.color = isWin ? "#44ff44" : "#ff4444";
+    gameOverOverlay.style.display = "flex";
+    isGameOver = true;
+    inputSender.stop();
+  }
 
   // ── Room code HUD ──
   const roomCodeDiv = document.createElement("div");
@@ -205,6 +239,30 @@ async function startGame(container: HTMLElement) {
       }
     },
 
+    onPlayerEliminated(playerId: string) {
+      console.info(`[game] player eliminated: ${playerId.slice(-8)}`);
+      if (playerId === myPlayerId) {
+        isEliminated = true;
+        showGameOverOverlay("ELIMINATED!", false);
+      } else {
+        // Remove eliminated remote player from scene
+        const remote = remoteFishes.get(playerId);
+        if (remote) {
+          disposeRemoteFish(remote, gameScene.scene);
+          remoteFishes.delete(playerId);
+        }
+      }
+    },
+
+    onRoundWinner(winnerId: string) {
+      console.info(`[game] round winner: ${winnerId.slice(-8)}`);
+      if (winnerId === myPlayerId) {
+        showGameOverOverlay("YOU WIN!", true);
+      } else {
+        showGameOverOverlay("YOU LOSE!", false);
+      }
+    },
+
     onError(code: string, message: string) {
       console.error(`[server] ${code}: ${message}`);
     },
@@ -263,9 +321,22 @@ async function startGame(container: HTMLElement) {
   let physicsAccumulator = 0;
 
   function tick() {
+    if (isGameOver || isEliminated) {
+      gameScene.renderer.render(gameScene.scene, gameScene.camera);
+      requestAnimationFrame(tick);
+      return;
+    }
+
     const frameDelta = Math.min(clock.getDelta(), 0.1);
 
     if (localFish) {
+      // Check if fish fell off platform
+      if (checkFishFallen(localFish)) {
+        isGameOver = true;
+        gameOverOverlay.style.display = "flex";
+        inputSender.stop();
+        return;
+      }
       // Update gravity in case GUI changed it
       world.gravity = { x: 0, y: FLOP.GRAVITY, z: 0 };
 

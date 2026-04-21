@@ -29,14 +29,14 @@ export type FishMeshes = {
   eyeR: THREE.Mesh;
 };
 
+// Simplified LocalFish type (cube-based, single body)
 export type LocalFish = {
   id: string;
-  head: RAPIER.RigidBody;
   body: RAPIER.RigidBody;
+  // Compatibility shims for 3-body code paths
+  head: RAPIER.RigidBody;
   tail: RAPIER.RigidBody;
-  headJoint: RAPIER.ImpulseJoint;
-  tailJoint: RAPIER.ImpulseJoint;
-  meshes: FishMeshes;
+  meshes: { cubeMesh: THREE.Mesh } & Partial<FishMeshes>;
   phase: FlopPhase;
   phaseTime: number;
   grounded: boolean;
@@ -46,147 +46,57 @@ export type LocalFish = {
 };
 
 // ─────────────────────────────────────────────
-// GLB MODEL LOADER
+// CUBE MOVEMENT CONSTANTS
 // ─────────────────────────────────────────────
 
-let _fishModel: {
-  headGeo: THREE.BufferGeometry;
-  bodyGeo: THREE.BufferGeometry;
-  tailGeo: THREE.BufferGeometry;
-  material: THREE.MeshStandardMaterial;
-} | null = null;
+const CUBE_MOVE_SPEED = 6.0;      // Direct velocity (not force)
+const CUBE_AIR_CONTROL = 0.3;     // Air control multiplier
 
-export async function loadFishModel(url: string): Promise<void> {
-  const loader = new GLTFLoader();
-  const gltf = await loader.loadAsync(url);
+// Spring jump (charged jump) constants
+const CUBE_JUMP_MIN_CHARGE = 0.05;   // 50ms minimum to trigger jump
+const CUBE_JUMP_MAX_CHARGE = 0.5;    // 500ms max charge time
+const CUBE_JUMP_BASE = 6.0;          // Minimum jump impulse (tap)
+const CUBE_JUMP_BONUS = 6.0;         // Extra impulse at full charge
+// Total range: 6.0 (tap) to 12.0 (full charge)
 
-  let headGeo: THREE.BufferGeometry | undefined;
-  let bodyGeo: THREE.BufferGeometry | undefined;
-  let tailGeo: THREE.BufferGeometry | undefined;
-  let material: THREE.MeshStandardMaterial | undefined;
-
-  gltf.scene.traverse((child) => {
-    if (!(child as THREE.Mesh).isMesh) return;
-    const mesh = child as THREE.Mesh;
-    const name = mesh.name.replace(/[\s_]+$/, "").toLowerCase();
-
-    // Bake node rotation into geometry (Blender Z-up → glTF Y-up)
-    const rotMat = new THREE.Matrix4().makeRotationFromQuaternion(mesh.quaternion);
-    mesh.geometry.applyMatrix4(rotMat);
-
-    // Center geometry at origin — vertices are in scene-space, not node-local
-    mesh.geometry.computeBoundingBox();
-    const center = new THREE.Vector3();
-    mesh.geometry.boundingBox!.getCenter(center);
-    mesh.geometry.translate(-center.x, -center.y, -center.z);
-
-    // Mirror facing direction (model faces +Z, game expects -Z)
-    mesh.geometry.rotateY(Math.PI);
-
-    if (name === "head") {
-      mesh.geometry.translate(0, 0, -0.2);
-      headGeo = mesh.geometry;
-    } else if (name === "body") bodyGeo = mesh.geometry;
-    else if (name === "tail") tailGeo = mesh.geometry;
-
-    if (!material) {
-      const mat = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-      if (mat instanceof THREE.MeshStandardMaterial) material = mat;
-    }
-  });
-
-  if (!headGeo || !bodyGeo || !tailGeo || !material) {
-    throw new Error("Fish GLB missing head, body, or tail mesh");
-  }
-
-  _fishModel = { headGeo, bodyGeo, tailGeo, material };
+// No-op stub for model loading (cube doesn't need a model)
+export async function loadFishModel(_url: string): Promise<void> {
+  // No model needed for cube
 }
 
-// ─────────────────────────────────────────────
-// FISH MESHES (Three.js only — no Rapier)
-// ─────────────────────────────────────────────
-
+// Cube meshes (simplified single mesh)
 export function createFishMeshes(
   scene: THREE.Scene,
   gradTex: THREE.DataTexture,
   color: string = "#ff8c42"
 ): FishMeshes {
-  const parsedColor = new THREE.Color(color);
-  const headColor = new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.2);
+  // Create a simple cube mesh
+  const cubeMesh = createCubeMesh(scene, gradTex, color);
 
-  let headMesh: THREE.Mesh;
-  let bodyMesh: THREE.Mesh;
-  let tailMesh: THREE.Mesh;
+  // Return compatibility shim — all mesh refs point to cube
+  return {
+    headMesh: cubeMesh,
+    bodyMesh: cubeMesh,
+    tailMesh: cubeMesh,
+    eyeL: cubeMesh,
+    eyeR: cubeMesh,
+  };
+}
 
-  if (_fishModel) {
-    // GLB model path — clone material per fish for color tinting
-    const bodyMat = _fishModel.material.clone();
-    bodyMat.color.set(parsedColor);
-    const headMat = _fishModel.material.clone();
-    headMat.color.set(headColor);
-
-    headMesh = new THREE.Mesh(_fishModel.headGeo, headMat);
-    bodyMesh = new THREE.Mesh(_fishModel.bodyGeo, bodyMat);
-    tailMesh = new THREE.Mesh(_fishModel.tailGeo, bodyMat);
-  } else {
-    // Procedural fallback (sandbox / model not loaded)
-    const bodyMat = new THREE.MeshToonMaterial({
-      color: parsedColor,
-      gradientMap: gradTex,
-    });
-    const headMat = new THREE.MeshToonMaterial({
-      color: headColor,
-      gradientMap: gradTex,
-    });
-
-    const headGeo = new THREE.SphereGeometry(FLOP.HEAD_RADIUS, 12, 8);
-    headMesh = new THREE.Mesh(headGeo, headMat);
-    headMesh.scale.set(0.7, 1.0, 1.0);
-
-    const bodyGeo = new THREE.CapsuleGeometry(
-      FLOP.BODY_RADIUS,
-      FLOP.BODY_HALF_HEIGHT * 2,
-      8,
-      12
-    );
-    bodyGeo.rotateX(Math.PI / 2);
-    bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    bodyMesh.scale.set(0.65, 1.1, 1.0);
-
-    const tailGeo = new THREE.ConeGeometry(0.22, 0.45, 4);
-    tailGeo.rotateX(-Math.PI / 2);
-    tailGeo.rotateY(Math.PI / 4);
-    tailMesh = new THREE.Mesh(tailGeo, bodyMat);
-    tailMesh.scale.set(0.5, 1.3, 1.0);
-  }
-
-  headMesh.castShadow = true;
-  bodyMesh.castShadow = true;
-  tailMesh.castShadow = true;
-  scene.add(headMesh);
-  scene.add(bodyMesh);
-  scene.add(tailMesh);
-
-  // Eyes (procedural — hidden when using GLB model)
-  const eyeWhite = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const eyePupil = new THREE.MeshBasicMaterial({ color: 0x111111 });
-  const eyeGeo = new THREE.SphereGeometry(0.06, 8, 6);
-  const pupilGeo = new THREE.SphereGeometry(0.035, 8, 6);
-
-  const eyeL = new THREE.Mesh(eyeGeo, eyeWhite);
-  eyeL.add(new THREE.Mesh(pupilGeo, eyePupil).translateZ(-0.03));
-  scene.add(eyeL);
-
-  const eyeR = new THREE.Mesh(eyeGeo, eyeWhite);
-  eyeR.add(new THREE.Mesh(pupilGeo, eyePupil).translateZ(-0.03));
-  scene.add(eyeR);
-
-  if (_fishModel) {
-    eyeL.visible = false;
-    eyeR.visible = false;
-  }
-
-  return { headMesh, bodyMesh, tailMesh, eyeL, eyeR };
+function createCubeMesh(
+  scene: THREE.Scene,
+  gradTex: THREE.DataTexture,
+  color: string = "#ff8c42"
+): THREE.Mesh {
+  const geometry = new THREE.BoxGeometry(1.0, 1.0, 1.0);
+  const material = new THREE.MeshToonMaterial({
+    color: new THREE.Color(color),
+    gradientMap: gradTex,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  return mesh;
 }
 
 // ─────────────────────────────────────────────
@@ -194,23 +104,23 @@ export function createFishMeshes(
 // ─────────────────────────────────────────────
 
 export function createGroundCollider(world: RAPIER.World): RAPIER.Collider {
-  // Half-height 5 → slab is 10 units thick, top surface sits at y=0.
-  // Thick slab prevents high-impulse fish from tunnelling through a thin plane.
-  const desc = RAPIER.ColliderDesc.cuboid(30, 5, 30)
+  // 20x20 platform: half-extents = 10x5x10, top surface at y=0
+  const desc = RAPIER.ColliderDesc.cuboid(10, 5, 10)
     .setTranslation(0, -5, 0)
     .setFriction(FLOP.GROUND_FRICTION)
     .setRestitution(FLOP.GROUND_RESTITUTION)
     .setCollisionGroups(0x00010002);
-  const ground = world.createCollider(desc);
+  return world.createCollider(desc);
+}
 
-  // Edge walls removed — kitchen model provides natural boundaries.
-  // Counter/shelf colliders will be added separately.
-
-  return ground;
+/** Check if fish has fallen off the platform (below Y threshold). */
+export function checkFishFallen(fish: LocalFish): boolean {
+  const bodyY = fish.body.translation().y;
+  return bodyY < -3;
 }
 
 // ─────────────────────────────────────────────
-// LOCAL FISH (Rapier + Three.js)
+// LOCAL CUBE (simplified single-body physics)
 // ─────────────────────────────────────────────
 
 export function createLocalFish(
@@ -221,101 +131,37 @@ export function createLocalFish(
   color: string = "#ff8c42",
   spawnPos: { x: number; y: number; z: number } = { x: 0, y: 2, z: 0 }
 ): LocalFish {
-  const meshes = createFishMeshes(scene, gradTex, color);
+  // Create cube mesh
+  const cubeMesh = createCubeMesh(scene, gradTex, color);
 
-  // HEAD rigid body
-  const headDesc = RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z - 0.55)
-    .setLinearDamping(FLOP.LINEAR_DAMPING)
-    .setAngularDamping(FLOP.ANGULAR_DAMPING)
-    .setCcdEnabled(true);
-  const headRB = world.createRigidBody(headDesc);
-  const headCollDesc = RAPIER.ColliderDesc.ball(FLOP.HEAD_RADIUS)
-    .setDensity(FLOP.HEAD_MASS / ((4 / 3) * Math.PI * FLOP.HEAD_RADIUS ** 3))
-    .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION)
-    .setCollisionGroups(0x00020001);
-  world.createCollider(headCollDesc, headRB);
-
-  // BODY rigid body
+  // Single rigid body for cube - high damping for tight control
   const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z)
-    .setLinearDamping(FLOP.LINEAR_DAMPING)
-    .setAngularDamping(FLOP.ANGULAR_DAMPING)
+    .setLinearDamping(5.0)   // High damping to stop quickly
+    .setAngularDamping(5.0)  // High angular damping
     .setCcdEnabled(true);
   const bodyRB = world.createRigidBody(bodyDesc);
-  const bodyVol =
-    Math.PI *
-    FLOP.BODY_RADIUS ** 2 *
-    (2 * FLOP.BODY_HALF_HEIGHT + (4 / 3) * FLOP.BODY_RADIUS);
-  const bodyCollDesc = RAPIER.ColliderDesc.capsule(
-    FLOP.BODY_HALF_HEIGHT,
-    FLOP.BODY_RADIUS
-  )
-    .setDensity(FLOP.BODY_MASS / bodyVol)
-    .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION)
+
+  // Cuboid collider (0.5 half-extents = 1.0 unit cube)
+  const collDesc = RAPIER.ColliderDesc.cuboid(0.5, 0.5, 0.5)
+    .setFriction(0.5)
+    .setRestitution(0.1)
     .setCollisionGroups(0x00020001);
-  world.createCollider(bodyCollDesc, bodyRB);
-
-  // TAIL rigid body
-  const tailDesc = RAPIER.RigidBodyDesc.dynamic()
-    .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z + 0.55)
-    .setLinearDamping(FLOP.LINEAR_DAMPING)
-    .setAngularDamping(FLOP.ANGULAR_DAMPING)
-    .setCcdEnabled(true);
-  const tailRB = world.createRigidBody(tailDesc);
-  const tailCollDesc = RAPIER.ColliderDesc.ball(FLOP.TAIL_RADIUS)
-    .setDensity(FLOP.TAIL_MASS / ((4 / 3) * Math.PI * FLOP.TAIL_RADIUS ** 3))
-    .setFriction(FLOP.FISH_FRICTION)
-    .setRestitution(FLOP.FISH_RESTITUTION)
-    .setCollisionGroups(0x00020001);
-  world.createCollider(tailCollDesc, tailRB);
-
-  // JOINTS — Y axis (horizontal lateral bend)
-  const headJointData = RAPIER.JointData.revolute(
-    { x: 0, y: 0, z: 0.2 },
-    { x: 0, y: 0, z: -0.35 },
-    { x: 0, y: 1, z: 0 }
-  );
-  const headJoint = world.createImpulseJoint(
-    headJointData,
-    headRB,
-    bodyRB,
-    true
-  );
-  (headJoint as RAPIER.RevoluteImpulseJoint).setLimits(
-    -FLOP.JOINT_LIMIT,
-    FLOP.JOINT_LIMIT
-  );
-
-  const tailJointData = RAPIER.JointData.revolute(
-    { x: 0, y: 0, z: 0.35 },
-    { x: 0, y: 0, z: -0.15 },
-    { x: 0, y: 1, z: 0 }
-  );
-  const tailJoint = world.createImpulseJoint(
-    tailJointData,
-    bodyRB,
-    tailRB,
-    true
-  );
-  (tailJoint as RAPIER.RevoluteImpulseJoint).setLimits(
-    -FLOP.JOINT_LIMIT,
-    FLOP.JOINT_LIMIT
-  );
-
-  setMotor(headJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
-  setMotor(tailJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
+  world.createCollider(collDesc, bodyRB);
 
   return {
     id,
-    head: headRB,
     body: bodyRB,
-    tail: tailRB,
-    headJoint,
-    tailJoint,
-    meshes,
+    // Compatibility shims — head and tail reference same body
+    head: bodyRB,
+    tail: bodyRB,
+    meshes: {
+      cubeMesh,
+      // Partial FishMeshes compatibility
+      headMesh: cubeMesh as unknown as THREE.Mesh,
+      bodyMesh: cubeMesh as unknown as THREE.Mesh,
+      tailMesh: cubeMesh as unknown as THREE.Mesh,
+    },
     phase: "idle",
     phaseTime: 0,
     grounded: false,
@@ -336,57 +182,26 @@ function syncMeshToBody(mesh: THREE.Mesh, rb: RAPIER.RigidBody): void {
   mesh.quaternion.set(r.x, r.y, r.z, r.w);
 }
 
-/** Position eyes relative to head mesh using local frame offsets. */
+// No-op stub for eye sync (cube has no eyes)
 export function syncEyesToHead(
-  eyeL: THREE.Mesh,
-  eyeR: THREE.Mesh,
-  headMesh: THREE.Mesh
+  _eyeL: THREE.Mesh,
+  _eyeR: THREE.Mesh,
+  _headMesh: THREE.Mesh
 ): void {
-  const headQ = headMesh.quaternion;
-  const base = headMesh.position;
-  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(headQ);
-  const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(headQ);
-  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(headQ);
-
-  eyeL.position
-    .copy(base)
-    .add(right.clone().multiplyScalar(-0.12))
-    .add(fwd.clone().multiplyScalar(0.12))
-    .add(up.clone().multiplyScalar(0.08));
-  eyeL.quaternion.copy(headQ);
-
-  eyeR.position
-    .copy(base)
-    .add(right.clone().multiplyScalar(0.12))
-    .add(fwd.clone().multiplyScalar(0.12))
-    .add(up.clone().multiplyScalar(0.08));
-  eyeR.quaternion.copy(headQ);
+  // No eyes on cube
 }
 
 /** Sync all LocalFish meshes from Rapier body positions. */
 export function syncFishMeshes(fish: LocalFish): void {
-  syncMeshToBody(fish.meshes.headMesh, fish.head);
-  syncMeshToBody(fish.meshes.bodyMesh, fish.body);
-  syncMeshToBody(fish.meshes.tailMesh, fish.tail);
-  syncEyesToHead(fish.meshes.eyeL, fish.meshes.eyeR, fish.meshes.headMesh);
+  // Sync cube mesh to single body
+  if (fish.meshes.cubeMesh) {
+    syncMeshToBody(fish.meshes.cubeMesh, fish.body);
+  }
 }
 
 // ─────────────────────────────────────────────
-// STATE MACHINE
+// GROUNDED CHECK (shared with cube)
 // ─────────────────────────────────────────────
-
-function setMotor(
-  joint: RAPIER.ImpulseJoint,
-  target: number,
-  stiffness: number,
-  damping: number
-): void {
-  (joint as RAPIER.RevoluteImpulseJoint).configureMotorPosition(
-    target,
-    stiffness,
-    damping
-  );
-}
 
 function checkGrounded(bodyRB: RAPIER.RigidBody, world: RAPIER.World): boolean {
   const bpos = bodyRB.translation();
@@ -394,9 +209,10 @@ function checkGrounded(bodyRB: RAPIER.RigidBody, world: RAPIER.World): boolean {
     { x: bpos.x, y: bpos.y, z: bpos.z },
     { x: 0, y: -1, z: 0 }
   );
+  // Cube half-height is 0.5, so check 0.5 + small margin
   const hit = world.castRay(
     ray,
-    FLOP.BODY_RADIUS + FLOP.GROUND_RAY_LENGTH,
+    0.6,
     true,
     undefined,
     undefined,
@@ -406,123 +222,18 @@ function checkGrounded(bodyRB: RAPIER.RigidBody, world: RAPIER.World): boolean {
   return hit !== null;
 }
 
-function clampVelocity(rb: RAPIER.RigidBody, max: number): void {
-  const v = rb.linvel();
-  const hSpeed = Math.sqrt(v.x ** 2 + v.z ** 2);
-  if (hSpeed > max) {
-    const s = max / hSpeed;
-    rb.setLinvel({ x: v.x * s, y: v.y, z: v.z * s }, true);
-  }
-}
+// ─────────────────────────────────────────────
+// SIMPLIFIED CUBE UPDATE (WASD + charged jump)
+// ─────────────────────────────────────────────
 
-// Multiplies horizontal (XZ) velocity by `factor` each tick to bring the fish to a stop.
-// Hard-zeros once speed drops below the deadzone threshold — prevents tiny residual
-// velocity from being amplified by a jump impulse mid-air.
-const BRAKE_DEADZONE = 0.05;
-function brakeHorizontal(fish: LocalFish, factor: number): void {
-  for (const rb of [fish.body, fish.head, fish.tail]) {
-    const v = rb.linvel();
-    const nx = v.x * factor;
-    const nz = v.z * factor;
-    const speed = Math.sqrt(nx * nx + nz * nz);
-    rb.setLinvel(
-      { x: speed < BRAKE_DEADZONE ? 0 : nx, y: v.y, z: speed < BRAKE_DEADZONE ? 0 : nz },
-      true
-    );
-  }
-}
-
-function applyFacingForce(fish: LocalFish, dt: number): void {
-  const rot = fish.body.rotation();
-  const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
-  const euler = new THREE.Euler().setFromQuaternion(q, "YXZ");
-
-  let diff = fish.facingAngle - euler.y;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
-
-  const yAngVel = fish.body.angvel().y;
-  const torqueY =
-    (diff * FLOP.FACING_TORQUE - yAngVel * FLOP.FACING_DAMPING) * dt;
-  fish.body.applyTorqueImpulse({ x: 0, y: torqueY, z: 0 }, true);
-}
-
-function applyRecoveryTorque(fish: LocalFish): void {
-  const rot = fish.body.rotation();
-  const q = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
-  const bodyUp = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-  const worldUp = new THREE.Vector3(0, 1, 0);
-
-  const cross = new THREE.Vector3().crossVectors(bodyUp, worldUp);
-  const dot = bodyUp.dot(worldUp);
-  const strength = FLOP.RECOVERY_TORQUE * (1 - dot);
-
-  fish.body.applyTorqueImpulse(
-    { x: cross.x * strength * 0.01, y: 0, z: cross.z * strength * 0.01 },
-    true
-  );
-}
-
-function applyVerticalDynamics(fish: LocalFish, dt: number): void {
-  const phase = fish.phase;
-
-  if (phase === "idle") {
-    const breathe = Math.sin(fish.phaseTime * 3) * 0.3;
-    fish.head.applyTorqueImpulse({ x: breathe * dt, y: 0, z: 0 }, true);
-    fish.tail.applyTorqueImpulse(
-      { x: -breathe * dt * 0.5, y: 0, z: 0 },
-      true
-    );
-  }
-  if (phase === "curl") {
-    fish.head.applyTorqueImpulse({ x: -1.5 * dt, y: 0, z: 0 }, true);
-    fish.tail.applyTorqueImpulse({ x: 0.8 * dt, y: 0, z: 0 }, true);
-  }
-  if (phase === "snap") {
-    fish.head.applyTorqueImpulse({ x: 2.0 * dt, y: 0, z: 0 }, true);
-    fish.tail.applyTorqueImpulse({ x: -3.0 * dt, y: 0, z: 0 }, true);
-  }
-  if (phase === "airborne") {
-    const flutter = Math.sin(fish.phaseTime * 18) * 1.2;
-    fish.tail.applyTorqueImpulse({ x: flutter * dt, y: 0, z: 0 }, true);
-    fish.head.applyTorqueImpulse({ x: 0.5 * dt, y: 0, z: 0 }, true);
-  }
-  if (phase === "land") {
-    const impact = Math.max(0, 1 - fish.phaseTime * 20);
-    fish.head.applyTorqueImpulse(
-      { x: 3.0 * impact * dt, y: 0, z: 0 },
-      true
-    );
-    fish.tail.applyTorqueImpulse(
-      { x: -2.0 * impact * dt, y: 0, z: 0 },
-      true
-    );
-  }
-  if (phase === "jump_charge") {
-    const chargeT = fish.jumpCharge / FLOP.JUMP_MAX_CHARGE;
-    fish.head.applyTorqueImpulse(
-      { x: 2.0 * chargeT * dt, y: 0, z: 0 },
-      true
-    );
-    fish.tail.applyTorqueImpulse(
-      { x: 1.5 * chargeT * dt, y: 0, z: 0 },
-      true
-    );
-  }
-  if (phase === "jump_snap") {
-    fish.head.applyTorqueImpulse({ x: -4.0 * dt, y: 0, z: 0 }, true);
-    fish.tail.applyTorqueImpulse({ x: 2.0 * dt, y: 0, z: 0 }, true);
-  }
-}
-
-/** Run the flop state machine for one frame. */
+/** Run simplified cube physics for one frame. */
 export function updateLocalFish(
   fish: LocalFish,
   world: RAPIER.World,
   dt: number,
   input: PlayerInput
 ): void {
-  // Set move direction from input
+  // Parse input
   let moveX = input.moveX;
   let moveY = input.moveY;
   const moveLen = Math.sqrt(moveX * moveX + moveY * moveY);
@@ -531,209 +242,47 @@ export function updateLocalFish(
     moveY /= moveLen;
   }
   const hasInput = moveLen > 0.1;
-  const spaceDown = input.spaceDown;
-  const spaceJustReleased = input.spaceJustReleased;
 
-  fish.phaseTime += dt;
   fish.grounded = checkGrounded(fish.body, world);
+  const v = fish.body.linvel();
 
-  if (fish.grounded && fish.phase !== "snap" && fish.phase !== "jump_snap") {
-    applyRecoveryTorque(fish);
+  // Movement (works during charge too)
+  if (hasInput) {
+    // Direct velocity control - no momentum buildup
+    const speed = fish.grounded ? CUBE_MOVE_SPEED : CUBE_MOVE_SPEED * CUBE_AIR_CONTROL;
+    fish.body.setLinvel({ x: moveX * speed, y: v.y, z: moveY * speed }, true);
+  } else if (fish.grounded) {
+    // Instant stop when no input (preserve Y for gravity)
+    fish.body.setLinvel({ x: 0, y: v.y, z: 0 }, true);
   }
 
-  if (hasInput && fish.grounded) {
-    applyFacingForce(fish, dt);
-  }
+  // Jump charging state machine
+  if (fish.phase === "idle") {
+    // Start charging when space pressed while grounded
+    if (input.spaceDown && fish.grounded) {
+      fish.phase = "jump_charge";
+      fish.jumpCharge = 0;
+    }
+  } else if (fish.phase === "jump_charge") {
+    // Accumulate charge while space held
+    fish.jumpCharge = Math.min(fish.jumpCharge + dt, CUBE_JUMP_MAX_CHARGE);
 
-  clampVelocity(fish.body, FLOP.MAX_VELOCITY);
-  clampVelocity(fish.head, FLOP.MAX_VELOCITY * 1.2);
-  clampVelocity(fish.tail, FLOP.MAX_VELOCITY * 1.2);
-
-  const s = fish.curlSign;
-  applyVerticalDynamics(fish, dt);
-
-  switch (fish.phase) {
-    case "idle":
-      setMotor(fish.headJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
-      setMotor(fish.tailJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
-      if (hasInput && fish.grounded) {
-        fish.facingAngle = Math.atan2(moveX, moveY);
-        fish.phase = "curl";
-        fish.phaseTime = 0;
-      } else if (spaceDown && fish.grounded) {
-        fish.phase = "jump_charge";
-        fish.phaseTime = 0;
-        fish.jumpCharge = 0;
-      } else if (!hasInput && fish.grounded) {
-        // Brake: kills horizontal sliding when no key is held, factor 0.8 → stops in ~10 frames
-        brakeHorizontal(fish, 0.8);
+    // Release jump on space release
+    if (input.spaceJustReleased) {
+      if (fish.jumpCharge >= CUBE_JUMP_MIN_CHARGE && fish.grounded) {
+        const chargeRatio = fish.jumpCharge / CUBE_JUMP_MAX_CHARGE;
+        const impulse = CUBE_JUMP_BASE + chargeRatio * CUBE_JUMP_BONUS;
+        fish.body.applyImpulse({ x: 0, y: impulse, z: 0 }, true);
       }
-      break;
-
-    case "curl":
-      setMotor(
-        fish.headJoint,
-        s * FLOP.CURL_HEAD_ANGLE,
-        FLOP.CURL_STIFFNESS,
-        FLOP.CURL_DAMPING
-      );
-      setMotor(
-        fish.tailJoint,
-        -s * FLOP.CURL_TAIL_ANGLE,
-        FLOP.CURL_STIFFNESS,
-        FLOP.CURL_DAMPING
-      );
-      if (hasInput) {
-        fish.facingAngle = Math.atan2(moveX, moveY);
-      }
-      if (fish.phaseTime >= FLOP.CURL_DURATION) {
-        fish.phase = "snap";
-        fish.phaseTime = 0;
-      }
-      break;
-
-    case "snap":
-      setMotor(
-        fish.headJoint,
-        s * FLOP.SNAP_HEAD_ANGLE,
-        FLOP.SNAP_STIFFNESS,
-        FLOP.SNAP_DAMPING
-      );
-      setMotor(
-        fish.tailJoint,
-        -s * FLOP.SNAP_TAIL_ANGLE,
-        FLOP.SNAP_STIFFNESS,
-        FLOP.SNAP_DAMPING
-      );
-      if (fish.phaseTime < dt * 1.5) {
-        // Zero horizontal velocity on all bodies before launching so residual
-        // sliding speed can't bleed into the flop direction mid-air
-        for (const rb of [fish.body, fish.head, fish.tail]) {
-          const v = rb.linvel();
-          rb.setLinvel({ x: 0, y: v.y, z: 0 }, true);
-        }
-        const fx = Math.sin(fish.facingAngle) * FLOP.MOVE_FORCE;
-        const fz = Math.cos(fish.facingAngle) * FLOP.MOVE_FORCE;
-        fish.body.applyImpulse({ x: fx, y: FLOP.LAUNCH_UP, z: fz }, true);
-        fish.tail.applyImpulse({ x: 0, y: -FLOP.TAIL_SLAP_DOWN, z: 0 }, true);
-      }
-      if (fish.phaseTime >= FLOP.SNAP_DURATION) {
-        fish.curlSign *= -1;
-        fish.phase = "airborne";
-        fish.phaseTime = 0;
-      }
-      break;
-
-    case "airborne":
-      setMotor(fish.headJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
-      setMotor(fish.tailJoint, 0, FLOP.AIR_STIFFNESS, FLOP.AIR_DAMPING);
-      if (hasInput) {
-        const fx = moveX * FLOP.MOVE_FORCE * FLOP.AIR_CONTROL;
-        const fz = moveY * FLOP.MOVE_FORCE * FLOP.AIR_CONTROL;
-        fish.body.addForce({ x: fx, y: 0, z: fz }, true);
-      }
-      if (fish.grounded && fish.phaseTime > 0.1) {
-        fish.phase = "land";
-        fish.phaseTime = 0;
-      }
-      break;
-
-    case "land":
-      setMotor(fish.headJoint, 0, FLOP.CURL_STIFFNESS, FLOP.CURL_DAMPING);
-      setMotor(fish.tailJoint, 0, FLOP.CURL_STIFFNESS, FLOP.CURL_DAMPING);
-      if (fish.phaseTime >= FLOP.LAND_COOLDOWN) {
-        if (spaceDown) {
-          fish.phase = "jump_charge";
-          fish.phaseTime = 0;
-          fish.jumpCharge = 0;
-        } else if (hasInput) {
-          fish.facingAngle = Math.atan2(moveX, moveY);
-          fish.phase = "curl";
-          fish.phaseTime = 0;
-        } else {
-          fish.phase = "idle";
-          fish.phaseTime = 0;
-        }
-      }
-      break;
-
-    case "jump_charge": {
-      fish.jumpCharge = Math.min(fish.jumpCharge + dt, FLOP.JUMP_MAX_CHARGE);
-      const chargeT = fish.jumpCharge / FLOP.JUMP_MAX_CHARGE;
-      const coilAmt = chargeT * FLOP.JUMP_CHARGE_COIL;
-      setMotor(
-        fish.headJoint,
-        -s * coilAmt,
-        FLOP.CURL_STIFFNESS,
-        FLOP.CURL_DAMPING
-      );
-      setMotor(
-        fish.tailJoint,
-        s * coilAmt,
-        FLOP.CURL_STIFFNESS,
-        FLOP.CURL_DAMPING
-      );
-      if (hasInput) {
-        fish.facingAngle = Math.atan2(moveX, moveY);
-        applyFacingForce(fish, dt);
-      }
-      if (spaceJustReleased) {
-        if (fish.jumpCharge >= FLOP.JUMP_MIN_CHARGE) {
-          fish.phase = "jump_snap";
-          fish.phaseTime = 0;
-        } else {
-          fish.phase = "idle";
-          fish.phaseTime = 0;
-        }
-      }
-      if (!fish.grounded) {
-        fish.phase = "airborne";
-        fish.phaseTime = 0;
-      }
-      break;
+      fish.phase = "idle";
+      fish.jumpCharge = 0;
     }
 
-    case "jump_snap":
-      setMotor(
-        fish.headJoint,
-        0,
-        FLOP.JUMP_SNAP_STIFFNESS,
-        FLOP.SNAP_DAMPING
-      );
-      setMotor(
-        fish.tailJoint,
-        0,
-        FLOP.JUMP_SNAP_STIFFNESS,
-        FLOP.SNAP_DAMPING
-      );
-      if (fish.phaseTime < dt * 1.5) {
-        const ct = Math.min(fish.jumpCharge / FLOP.JUMP_MAX_CHARGE, 1);
-        const upImpulse = FLOP.JUMP_BASE_IMPULSE + ct * FLOP.JUMP_CHARGE_BONUS;
-        let fx = 0,
-          fz = 0;
-        if (hasInput) {
-          fx = Math.sin(fish.facingAngle) * FLOP.MOVE_FORCE * 0.4;
-          fz = Math.cos(fish.facingAngle) * FLOP.MOVE_FORCE * 0.4;
-        }
-        // Zero all velocities before jump
-        fish.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        fish.head.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        fish.tail.setLinvel({ x: 0, y: 0, z: 0 }, true);
-        fish.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        fish.head.setAngvel({ x: 0, y: 0, z: 0 }, true);
-        fish.tail.setAngvel({ x: 0, y: 0, z: 0 }, true);
-
-        fish.body.applyImpulse({ x: fx, y: upImpulse, z: fz }, true);
-        fish.head.applyImpulse({ x: 0, y: upImpulse * 0.6, z: 0 }, true);
-        fish.tail.applyImpulse({ x: 0, y: upImpulse * 0.2, z: 0 }, true);
-
-        fish.curlSign *= -1;
-      }
-      if (fish.phaseTime >= FLOP.JUMP_SNAP_DURATION) {
-        fish.phase = "airborne";
-        fish.phaseTime = 0;
-      }
-      break;
+    // Cancel charge if fell off platform
+    if (!fish.grounded) {
+      fish.phase = "idle";
+      fish.jumpCharge = 0;
+    }
   }
 }
 
@@ -775,36 +324,15 @@ export async function initFlopSandbox(container: HTMLElement) {
   container.style.position = "relative";
 
   // ── Tweaking GUI ──
-  const gui = new GUI({ title: "Fish Tuning" });
+  const gui = new GUI({ title: "Cube Tuning" });
 
   const worldFolder = gui.addFolder("World");
   worldFolder.add(FLOP, "GRAVITY", -60, 0, 0.5).name("Gravity");
   worldFolder.add(FLOP, "GROUND_FRICTION", 0, 2, 0.05).name("Ground Friction");
   worldFolder.add(FLOP, "GROUND_RESTITUTION", 0, 1, 0.05).name("Ground Bounce");
 
-  const moveFolder = gui.addFolder("Movement");
-  moveFolder.add(FLOP, "MOVE_FORCE", 1, 30, 0.5).name("Move Force");
-  moveFolder.add(FLOP, "LAUNCH_UP", 0, 20, 0.5).name("Launch Up");
-  moveFolder.add(FLOP, "TAIL_SLAP_DOWN", 0, 15, 0.5).name("Tail Slap Down");
-  moveFolder.add(FLOP, "MAX_VELOCITY", 1, 25, 0.5).name("Max Velocity");
-  moveFolder.add(FLOP, "AIR_CONTROL", 0, 1, 0.05).name("Air Control");
-
-  const flopFolder = gui.addFolder("Flop Cycle");
-  flopFolder.add(FLOP, "CURL_DURATION", 0.02, 0.5, 0.01).name("Curl Duration");
-  flopFolder.add(FLOP, "CURL_STIFFNESS", 10, 500, 5).name("Curl Stiffness");
-  flopFolder.add(FLOP, "SNAP_STIFFNESS", 100, 3000, 50).name("Snap Stiffness");
-  flopFolder.add(FLOP, "SNAP_DURATION", 0.02, 0.3, 0.01).name("Snap Duration");
-
-  const jumpFolder = gui.addFolder("Jump");
-  jumpFolder.add(FLOP, "JUMP_BASE_IMPULSE", 5, 40, 0.5).name("Base Impulse");
-  jumpFolder.add(FLOP, "JUMP_CHARGE_BONUS", 0, 25, 0.5).name("Charge Bonus");
-  jumpFolder.add(FLOP, "JUMP_MAX_CHARGE", 0.1, 2, 0.05).name("Max Charge Time");
-  jumpFolder.add(FLOP, "JUMP_SNAP_STIFFNESS", 100, 2000, 50).name("Snap Stiffness");
-
-  const steerFolder = gui.addFolder("Steering");
-  steerFolder.add(FLOP, "RECOVERY_TORQUE", 1, 50, 1).name("Recovery Torque");
-  steerFolder.add(FLOP, "FACING_TORQUE", 1, 40, 1).name("Facing Torque");
-  steerFolder.add(FLOP, "FACING_DAMPING", 1, 20, 0.5).name("Facing Damping");
+  const camFolder = gui.addFolder("Camera");
+  camFolder.close();
 
   // Game loop — step physics every frame for smooth visuals
   const clock = new THREE.Clock();
@@ -855,17 +383,10 @@ export async function initFlopSandbox(container: HTMLElement) {
 
 function resetLocalFish(fish: LocalFish): void {
   const y = 2;
-  const bodies = [
-    { rb: fish.body, z: 0 },
-    { rb: fish.head, z: -0.55 },
-    { rb: fish.tail, z: 0.55 },
-  ];
-  for (const { rb, z } of bodies) {
-    rb.setTranslation({ x: 0, y, z }, true);
-    rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    rb.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-  }
+  fish.body.setTranslation({ x: 0, y, z: 0 }, true);
+  fish.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  fish.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  fish.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
   fish.phase = "idle";
   fish.phaseTime = 0;
   fish.facingAngle = 0;

@@ -46,3 +46,9 @@ export type JoinResult = {
     playerId: string;
     snapshot: GameSnapshot;
 };
+export type PlayerEliminatedPayload = {
+    playerId: string;
+};
+export type RoundWinnerPayload = {
+    winnerId: string;
+};

@@ -8,6 +8,8 @@ import {
   gameSnapshotSchema,
   roomDeltaSchema,
   playerLeftPayloadSchema,
+  playerEliminatedPayloadSchema,
+  roundWinnerPayloadSchema,
   protocolErrorSchema,
   type JoinResult,
   type GameSnapshot,
@@ -20,6 +22,8 @@ export type SocketManagerCallbacks = {
   onSnapshot(snapshot: GameSnapshot): void;
   onDelta(delta: RoomDelta): void;
   onPlayerLeft(playerId: string): void;
+  onPlayerEliminated(playerId: string): void;
+  onRoundWinner(winnerId: string): void;
   onError(code: string, message: string): void;
   onDisconnect(reason: string): void;
 };
@@ -87,6 +91,32 @@ export function createSocketManager(
         callbacks.onPlayerLeft(env.payload.playerId);
       } catch (err) {
         console.error("[socket-manager] failed to parse playerLeft", err);
+      }
+    });
+
+    sock.on(serverEvents.playerEliminated, (raw: unknown) => {
+      try {
+        const env = parseEnvelope(
+          serverEvents.playerEliminated,
+          playerEliminatedPayloadSchema,
+          raw
+        );
+        callbacks.onPlayerEliminated(env.payload.playerId);
+      } catch (err) {
+        console.error("[socket-manager] failed to parse playerEliminated", err);
+      }
+    });
+
+    sock.on(serverEvents.roundWinner, (raw: unknown) => {
+      try {
+        const env = parseEnvelope(
+          serverEvents.roundWinner,
+          roundWinnerPayloadSchema,
+          raw
+        );
+        callbacks.onRoundWinner(env.payload.winnerId);
+      } catch (err) {
+        console.error("[socket-manager] failed to parse roundWinner", err);
       }
     });
 

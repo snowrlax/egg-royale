@@ -1,126 +1,125 @@
 import RAPIER from "@dimforge/rapier3d-compat";
 import { FLOP } from "@fish-jam/shared";
-import { createServerFish } from "./server-fish.js";
+import { createServerEntity, applyInput, exportState, checkEliminated, disposeEntity, } from "./server-entity.js";
 const TICK_DT = 1 / 30;
-// Spawn positions spread across the ground
-const SPAWN_POSITIONS = [
-    { x: 0, y: 2, z: 0 },
-    { x: 2, y: 2, z: 0 },
-    { x: -2, y: 2, z: 0 },
-    { x: 0, y: 2, z: 2 },
-    { x: 0, y: 2, z: -2 },
-    { x: 2, y: 2, z: 2 },
-];
-export function createGameLoop() {
+export function createGameLoop(callbacks = {}) {
     const world = new RAPIER.World({ x: 0, y: FLOP.GRAVITY, z: 0 });
     world.timestep = TICK_DT;
-    // Ground collider
-    const groundDesc = RAPIER.ColliderDesc.cuboid(10, 0.15, 10)
+    // Thick slab: half-height 5 -> 10 units of solid geometry, top at y=0.
+    // Prevents high-impulse entities from tunnelling through a thin plane.
+    const groundDesc = RAPIER.ColliderDesc.cuboid(100, 5, 100)
+        .setTranslation(0, -5, 0)
         .setFriction(FLOP.GROUND_FRICTION)
         .setRestitution(FLOP.GROUND_RESTITUTION)
         .setCollisionGroups(0x00010002);
     world.createCollider(groundDesc);
-    // Edge walls
-    const wallHeight = 1.5;
-    const wallThick = 0.15;
-    const size = 10;
+    // Server-side box walls - approximate kitchen outer boundary at KITCHEN_SCALE=0.45.
+    // Client has exact trimesh; these just prevent entities escaping at the server level.
+    // Layout: kitchen spans roughly +/-19 in X, +/-17 in Z, up to ~20 in Y.
+    const WALL_GROUP = 0x00010002;
+    const wallHeight = 12; // half-height - covers full kitchen height
+    const wallThick = 1; // half-thickness
     const walls = [
-        { hx: size, hy: wallHeight, hz: wallThick, tx: 0, tz: size },
-        { hx: size, hy: wallHeight, hz: wallThick, tx: 0, tz: -size },
-        { hx: wallThick, hy: wallHeight, hz: size, tx: size, tz: 0 },
-        { hx: wallThick, hy: wallHeight, hz: size, tx: -size, tz: 0 },
+        { hx: wallThick, hy: wallHeight, hz: 20, tx: -22, ty: wallHeight, tz: 0 }, // left
+        { hx: wallThick, hy: wallHeight, hz: 20, tx: 22, ty: wallHeight, tz: 0 }, // right
+        { hx: 24, hy: wallHeight, hz: wallThick, tx: 0, ty: wallHeight, tz: -20 }, // front
+        { hx: 24, hy: wallHeight, hz: wallThick, tx: 0, ty: wallHeight, tz: 20 }, // back
     ];
     for (const w of walls) {
-        const wallDesc = RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
-            .setTranslation(w.tx, wallHeight, w.tz)
-            .setRestitution(0.5)
-            .setCollisionGroups(0x00010002);
-        world.createCollider(wallDesc);
+        world.createCollider(RAPIER.ColliderDesc.cuboid(w.hx, w.hy, w.hz)
+            .setTranslation(w.tx, w.ty, w.tz)
+            .setCollisionGroups(WALL_GROUP));
     }
-    const fishMap = new Map();
+    const entities = new Map();
     const inputQueue = new Map();
-    const pendingRemovals = [];
     let tick = 0;
-    let spawnIndex = 0;
     return {
-        addFish(playerId) {
-            if (fishMap.has(playerId))
-                return;
-            const pos = SPAWN_POSITIONS[spawnIndex % SPAWN_POSITIONS.length];
-            spawnIndex++;
-            const fish = createServerFish(playerId, world, pos);
-            fishMap.set(playerId, fish);
+        addPlayer(playerId, spawnPos, color) {
+            if (entities.has(playerId))
+                return; // Already exists
+            const entity = createServerEntity(playerId, world, spawnPos, color);
+            entities.set(playerId, entity);
             inputQueue.set(playerId, []);
         },
-        removeFish(playerId) {
-            const fish = fishMap.get(playerId);
-            if (!fish)
+        removePlayer(playerId) {
+            const entity = entities.get(playerId);
+            if (!entity)
                 return;
-            fish.dispose(world);
-            fishMap.delete(playerId);
+            disposeEntity(entity, world);
+            entities.delete(playerId);
             inputQueue.delete(playerId);
-            pendingRemovals.push(playerId);
         },
         enqueueInput(playerId, input) {
-            const queue = inputQueue.get(playerId);
-            if (!queue)
-                return;
-            // Keep queue bounded — only latest matters for this tick
+            let queue = inputQueue.get(playerId);
+            if (!queue) {
+                queue = [];
+                inputQueue.set(playerId, queue);
+            }
+            // Keep queue bounded - only latest matters for this tick
             if (queue.length > 3)
                 queue.shift();
             queue.push(input);
         },
         step() {
             tick++;
-            // Drain input queues → apply latest input to each fish
+            // Apply inputs to entities
             for (const [playerId, queue] of inputQueue) {
-                const fish = fishMap.get(playerId);
-                if (!fish)
-                    continue;
-                const latest = queue.pop();
-                if (latest) {
-                    // Merge spaceJustReleased from all queued inputs so jumps survive redundancy dedup
-                    const hasSpaceRelease = latest.spaceJustReleased ||
-                        queue.some((inp) => inp.spaceJustReleased);
-                    queue.length = 0; // drain
-                    fish.applyInput(hasSpaceRelease
-                        ? { ...latest, spaceJustReleased: true }
-                        : latest);
-                }
-                else {
+                const entity = entities.get(playerId);
+                if (!entity || entity.eliminated) {
                     queue.length = 0;
+                    continue;
                 }
-            }
-            // Step each fish's state machine
-            for (const fish of fishMap.values()) {
-                fish.step(world, TICK_DT);
+                // Apply most recent input (or merge if needed)
+                const input = queue.pop();
+                queue.length = 0; // Drain remaining
+                if (input) {
+                    applyInput(entity, input, TICK_DT);
+                }
             }
             // Step physics
             world.step();
-            // Build delta — only include fish that actually moved (dirty tracking)
-            const updatedFish = [...fishMap.values()]
-                .filter((f) => f.isDirty())
-                .map((f) => f.exportState());
-            const removedFishIds = pendingRemovals.splice(0);
-            if (updatedFish.length === 0 && removedFishIds.length === 0)
+            // Check eliminations
+            const eliminated = [];
+            for (const entity of entities.values()) {
+                if (checkEliminated(entity)) {
+                    eliminated.push(entity.playerId);
+                }
+            }
+            // Notify eliminations
+            for (const playerId of eliminated) {
+                callbacks.onPlayerEliminated?.(playerId);
+            }
+            // Check for winner (last non-eliminated player)
+            const activePlayers = [...entities.values()].filter((e) => !e.eliminated);
+            if (entities.size >= 2 && activePlayers.length === 1) {
+                callbacks.onRoundWinner?.(activePlayers[0].playerId);
+            }
+            // Build delta with updated fish states
+            const updatedFish = [...entities.values()]
+                .filter((e) => !e.eliminated)
+                .map(exportState);
+            if (updatedFish.length === 0 && eliminated.length === 0) {
                 return null;
+            }
             return {
                 tick,
                 updatedFish,
-                removedFishIds,
+                removedFishIds: eliminated,
             };
         },
         exportSnapshot() {
             return {
                 tick,
-                fish: [...fishMap.values()].map((f) => f.peekState()),
+                fish: [...entities.values()]
+                    .filter((e) => !e.eliminated)
+                    .map(exportState),
             };
         },
         dispose() {
-            for (const fish of fishMap.values()) {
-                fish.dispose(world);
+            for (const entity of entities.values()) {
+                disposeEntity(entity, world);
             }
-            fishMap.clear();
+            entities.clear();
             inputQueue.clear();
             world.free();
         },

@@ -12,5 +12,7 @@ export const serverEvents = {
     snapshot: "room:snapshot",
     delta: "room:delta",
     playerLeft: "room:player-left",
+    playerEliminated: "room:player-eliminated",
+    roundWinner: "room:round-winner",
     protocolError: "protocol:error",
 };

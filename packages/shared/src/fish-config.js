@@ -58,4 +58,9 @@ export const FLOP = {
     ANGULAR_DAMPING: 0.4,
     // ── Ground detection ──
     GROUND_RAY_LENGTH: 0.15,
+    // ── Sumo collision tuning ──
+    PLAYER_MASS: 1.5,
+    PLAYER_FRICTION: 0.3,
+    PLAYER_RESTITUTION: 0.4,
+    FALL_THRESHOLD: -5,
 };

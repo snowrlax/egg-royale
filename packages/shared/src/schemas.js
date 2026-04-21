@@ -93,6 +93,14 @@ export const joinResultSchema = z.object({
 export const playerLeftPayloadSchema = z.object({
     playerId: playerIdSchema,
 });
+// ── Player Eliminated ──
+export const playerEliminatedPayloadSchema = z.object({
+    playerId: playerIdSchema,
+});
+// ── Round Winner ──
+export const roundWinnerPayloadSchema = z.object({
+    winnerId: playerIdSchema,
+});
 // ── Protocol Error ──
 export const protocolErrorCodeSchema = z.enum([
     "invalid-payload",

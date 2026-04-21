@@ -11,6 +11,8 @@ export {
   type RoomDelta,
   type RoomInfo,
   type JoinResult,
+  type PlayerEliminatedPayload,
+  type RoundWinnerPayload,
 } from "./types.js";
 export { clientEvents, serverEvents } from "./events.js";
 export type { ClientEventType, ServerEventType } from "./events.js";
@@ -30,6 +32,8 @@ export {
   roomDeltaSchema,
   joinResultSchema,
   playerLeftPayloadSchema,
+  playerEliminatedPayloadSchema,
+  roundWinnerPayloadSchema,
   protocolErrorCodeSchema,
   protocolErrorSchema,
 } from "./schemas.js";

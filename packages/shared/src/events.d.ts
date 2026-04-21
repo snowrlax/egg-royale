@@ -12,6 +12,8 @@ export declare const serverEvents: {
     readonly snapshot: "room:snapshot";
     readonly delta: "room:delta";
     readonly playerLeft: "room:player-left";
+    readonly playerEliminated: "room:player-eliminated";
+    readonly roundWinner: "room:round-winner";
     readonly protocolError: "protocol:error";
 };
 export type ClientEventType = (typeof clientEvents)[keyof typeof clientEvents];

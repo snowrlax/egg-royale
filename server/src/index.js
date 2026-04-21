@@ -17,6 +17,14 @@ async function main() {
                 foundation.io.to(roomId).emit(serverEvents.delta, createEnvelope(serverEvents.delta, delta));
             }
         },
+        onPlayerEliminated(roomId, playerId) {
+            foundation.io.to(roomId).emit(serverEvents.playerEliminated, createEnvelope(serverEvents.playerEliminated, { playerId }));
+            console.info(`[game] player eliminated: ${playerId.slice(-8)} in room ${roomId.slice(-8)}`);
+        },
+        onRoundWinner(roomId, winnerId) {
+            foundation.io.to(roomId).emit(serverEvents.roundWinner, createEnvelope(serverEvents.roundWinner, { winnerId }));
+            console.info(`[game] round winner: ${winnerId.slice(-8)} in room ${roomId.slice(-8)}`);
+        },
     });
     const sessions = new Map();
     function emitError(socket, code, message) {

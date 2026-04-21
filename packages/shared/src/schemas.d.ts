@@ -641,6 +641,20 @@ export declare const playerLeftPayloadSchema: z.ZodObject<{
 }, {
     playerId: string;
 }>;
+export declare const playerEliminatedPayloadSchema: z.ZodObject<{
+    playerId: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    playerId: string;
+}, {
+    playerId: string;
+}>;
+export declare const roundWinnerPayloadSchema: z.ZodObject<{
+    winnerId: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    winnerId: string;
+}, {
+    winnerId: string;
+}>;
 export declare const protocolErrorCodeSchema: z.ZodEnum<["invalid-payload", "room-not-found", "room-full", "not-allowed", "internal-error"]>;
 export declare const protocolErrorSchema: z.ZodObject<{
     code: z.ZodEnum<["invalid-payload", "room-not-found", "room-full", "not-allowed", "internal-error"]>;

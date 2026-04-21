@@ -61,8 +61,8 @@ export function createGameScene(container: HTMLElement): GameScene {
   gradientTexture.magFilter = THREE.NearestFilter;
   gradientTexture.needsUpdate = true;
 
-  // Temporary floor — kitchen GLB loads async on top of this
-  const groundGeo = new THREE.BoxGeometry(60, 0.3, 60);
+  // 20x20 flat platform
+  const groundGeo = new THREE.BoxGeometry(20, 0.3, 20);
   const groundMat = new THREE.MeshStandardMaterial({
     color: 0x8b7d6b,
     roughness: 0.8,
@@ -70,8 +70,7 @@ export function createGameScene(container: HTMLElement): GameScene {
   });
   const groundMesh = new THREE.Mesh(groundGeo, groundMat);
   groundMesh.receiveShadow = true;
-  // Sink below y=0 so Rapier's contact-skin overlap is hidden under the surface
-  groundMesh.position.y = -0.3;
+  groundMesh.position.y = -0.15;
   scene.add(groundMesh);
 
   // Resize

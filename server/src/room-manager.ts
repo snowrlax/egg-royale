@@ -7,13 +7,32 @@ import type {
   RoomDelta,
 } from "@fish-jam/shared";
 import type { TickLoop } from "./server-foundation.js";
-import { createGameLoop, type GameLoop } from "./game-loop.js";
-import RAPIER from "@dimforge/rapier3d-compat";
+import { createGameLoop, type GameLoop, type GameLoopCallbacks } from "./game-loop.js";
 
 const MAX_PLAYERS = 6;
 const ROOM_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const ROOM_CODE_LENGTH = 4;
 const EMPTY_ROOM_TTL_MS = 30_000;
+
+// Spawn positions in circle layout
+const SPAWN_POSITIONS = [
+  { x: -4, y: 2, z: 0 }, // Left
+  { x: 4, y: 2, z: 0 }, // Right
+  { x: 0, y: 2, z: -4 }, // Front
+  { x: 0, y: 2, z: 4 }, // Back
+  { x: -3, y: 2, z: -3 }, // Front-left
+  { x: 3, y: 2, z: 3 }, // Back-right
+];
+
+// Player colors
+const PLAYER_COLORS = [
+  "#ff8c42", // Orange
+  "#4287f5", // Blue
+  "#42f554", // Green
+  "#f542e9", // Magenta
+  "#f5f542", // Yellow
+  "#42f5f5", // Cyan
+];
 
 export class RoomError extends Error {
   readonly code: ProtocolErrorCode;
@@ -58,9 +77,16 @@ export type RoomStepCallback = (
   delta: RoomDelta | null
 ) => void;
 
+export type RoomEventCallback = (
+  roomId: string,
+  playerId: string
+) => void;
+
 export type RoomManagerOptions = {
   tickLoop: TickLoop;
   onRoomStepped: RoomStepCallback;
+  onPlayerEliminated?: RoomEventCallback;
+  onRoundWinner?: RoomEventCallback;
 };
 
 export type RoomManager = {
@@ -107,7 +133,17 @@ export function createRoomManager(options: RoomManagerOptions): RoomManager {
     const roomId = `room-${randomUUID()}`;
     const roomCode = generateRoomCode(codes);
 
-    const gameLoop = createGameLoop();
+    // Create callbacks that include roomId
+    const gameLoopCallbacks: GameLoopCallbacks = {
+      onPlayerEliminated: (playerId) => {
+        options.onPlayerEliminated?.(roomId, playerId);
+      },
+      onRoundWinner: (winnerId) => {
+        options.onRoundWinner?.(roomId, winnerId);
+      },
+    };
+
+    const gameLoop = createGameLoop(gameLoopCallbacks);
 
     const room: Room = {
       roomId,
@@ -152,13 +188,20 @@ export function createRoomManager(options: RoomManagerOptions): RoomManager {
     const playerId = createPlayerId();
     const name = resolveDisplayName(displayName);
 
+    // Get spawn position and color based on player index
+    const playerIndex = room.members.size;
+    const spawnPos = SPAWN_POSITIONS[playerIndex % SPAWN_POSITIONS.length];
+    const color = PLAYER_COLORS[playerIndex % PLAYER_COLORS.length];
+
+    // Add player to game loop physics
+    room.gameLoop.addPlayer(playerId, spawnPos, color);
+
     room.members.set(playerId, {
       playerId,
       displayName: name,
       connected: true,
     });
 
-    room.gameLoop.addFish(playerId);
     room.emptyAt = null;
 
     return {
@@ -213,8 +256,10 @@ export function createRoomManager(options: RoomManagerOptions): RoomManager {
       const member = room.members.get(playerId);
       if (!member) return false;
 
+      // Remove from physics
+      room.gameLoop.removePlayer(playerId);
+
       room.members.delete(playerId);
-      room.gameLoop.removeFish(playerId);
       pruneIfEmpty(room);
       return true;
     },
