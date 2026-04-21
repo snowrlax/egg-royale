@@ -81,6 +81,14 @@ export function interpolateRemoteFish(
   const buf = fish.stateBuffer;
   if (buf.length === 0) return;
 
+  // Log drift detection: if mesh position differs significantly from latest server state
+  const latestPos = buf[buf.length - 1].state.body.pos;
+  const meshPos = fish.meshes.bodyMesh.position;
+  const drift = Math.abs(meshPos.x - latestPos[0]) + Math.abs(meshPos.z - latestPos[2]);
+  if (drift > 0.5) {
+    console.log(`[INTERP] ${fish.id.slice(-8)} drift=${drift.toFixed(1)}, bufLen=${buf.length}`);
+  }
+
   // Only one state — snap directly
   if (buf.length === 1) {
     applyStateToMeshes(fish.meshes, buf[0].state);

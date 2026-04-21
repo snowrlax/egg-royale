@@ -38,6 +38,10 @@ export function createInputSender(
         }
 
         // Send all buffered inputs (oldest to newest)
+        // Only log when actually moving (reduces spam)
+        if (Math.abs(toSend.moveX) > 0.01 || Math.abs(toSend.moveY) > 0.01) {
+          console.log(`[INPUT-SENDER] moveX=${toSend.moveX.toFixed(2)}, moveY=${toSend.moveY.toFixed(2)}`);
+        }
         socketManager.sendInputs(roomId, playerId, [...inputBuffer]);
 
         // Clear latch only after send

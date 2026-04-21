@@ -89,6 +89,8 @@ async function main() {
         );
         const result = roomManager.quickJoin(envelope.payload.displayName);
 
+        console.log(`[SERVER] Player ${result.playerId.slice(-8)} joined room ${result.roomCode}, total players: ${result.snapshot.fish.length}`);
+
         sessions.set(socket.id, {
           socketId: socket.id,
           roomId: result.roomId,
@@ -198,6 +200,10 @@ async function main() {
         // Deduplicate: only forward inputs newer than lastProcessedSeq
         for (const input of envelope.payload.inputs) {
           if (input.seq > session.lastProcessedSeq) {
+            // Only log when there's actual movement (reduces spam)
+            if (Math.abs(input.moveX) > 0.01 || Math.abs(input.moveY) > 0.01) {
+              console.log(`[SERVER-INPUT] ${envelope.payload.playerId.slice(-8)} moveX=${input.moveX.toFixed(2)}, moveY=${input.moveY.toFixed(2)}`);
+            }
             roomManager.submitInput(
               envelope.payload.roomId,
               envelope.payload.playerId,

@@ -168,7 +168,10 @@ async function startGame(container: HTMLElement) {
     onJoined(result) {
       myPlayerId = result.playerId;
       roomCodeDiv.textContent = `Room: ${result.roomCode}`;
-      console.info(`[main] joined room=${result.roomCode} myId=${result.playerId.slice(-8)} snapshotFish=${result.snapshot.fish.length}`);
+      console.log(`[JOINED] roomCode=${result.roomCode}, myId=${result.playerId.slice(-8)}, existingPlayers=${result.snapshot.fish.length}`);
+      for (const fish of result.snapshot.fish) {
+        console.log(`[JOINED] player ${fish.id.slice(-8)} at pos=(${fish.body.pos[0].toFixed(1)}, ${fish.body.pos[1].toFixed(1)}, ${fish.body.pos[2].toFixed(1)})`);
+      }
 
       // Create local fish — find our fish in the snapshot
       const myFishState = result.snapshot.fish.find(
@@ -205,21 +208,24 @@ async function startGame(container: HTMLElement) {
     },
 
     onDelta(delta: RoomDelta) {
-      // DEBUG: Log delta reception
-      if (delta.updatedFish.length > 0) {
-        console.log(`[delta] updatedFish=${delta.updatedFish.length}`);
-      }
       for (const fs of delta.updatedFish) {
+        const isMe = fs.id === myPlayerId;
+
         // Skip local player — no server correction
-        if (fs.id === myPlayerId) continue;
-        // DEBUG: Log remote player positions
-        console.log(`[delta] remote ${fs.id.slice(-4)} pos=(${fs.body.pos[0].toFixed(1)}, ${fs.body.pos[1].toFixed(1)}, ${fs.body.pos[2].toFixed(1)})`);
+        if (isMe) continue;
 
         // Remote fish
         const existing = remoteFishes.get(fs.id);
         if (existing) {
+          // Only log remote fish position changes (reduces spam)
+          const oldPos = existing.stateBuffer[existing.stateBuffer.length - 1]?.state.body.pos;
+          const newPos = fs.body.pos;
+          if (!oldPos || Math.abs(newPos[0] - oldPos[0]) > 0.01 || Math.abs(newPos[2] - oldPos[2]) > 0.01) {
+            console.log(`[DELTA] remote ${fs.id.slice(-8)} moved to (${newPos[0].toFixed(1)}, ${newPos[2].toFixed(1)})`);
+          }
           updateRemoteFishState(existing, fs);
         } else {
+          console.log(`[DELTA] creating NEW remote fish ${fs.id.slice(-8)}`);
           // New player joined — create remote fish
           remoteFishes.set(
             fs.id,

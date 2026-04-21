@@ -24,10 +24,11 @@ export function createServerEntity(
   color: string
 ): ServerEntity {
   // Create rigid body (dynamic)
+  // Use same damping as client (5.0) for tight, responsive movement
   const bodyDesc = RAPIER.RigidBodyDesc.dynamic()
     .setTranslation(spawnPos.x, spawnPos.y, spawnPos.z)
-    .setLinearDamping(FLOP.LINEAR_DAMPING)
-    .setAngularDamping(FLOP.ANGULAR_DAMPING)
+    .setLinearDamping(5.0)   // Match client (fish-flop.ts line 140)
+    .setAngularDamping(5.0)  // Match client (fish-flop.ts line 141)
     .setCcdEnabled(true); // Prevent tunneling at high speeds
 
   const body = world.createRigidBody(bodyDesc);
@@ -51,6 +52,10 @@ export function createServerEntity(
   };
 }
 
+// Match client constants (fish-flop.ts lines 52-53)
+const CUBE_MOVE_SPEED = 6.0;
+const CUBE_AIR_CONTROL = 0.3;
+
 export function applyInput(
   entity: ServerEntity,
   input: PlayerInput,
@@ -59,26 +64,36 @@ export function applyInput(
   if (entity.eliminated) return;
 
   const body = entity.body;
+  const v = body.linvel();
 
-  // Apply movement force
-  const moveForce = FLOP.MOVE_FORCE;
-  const forceX = input.moveX * moveForce;
-  const forceZ = input.moveY * moveForce;
+  // Normalize input (match client fish-flop.ts lines 238-245)
+  let moveX = input.moveX;
+  let moveY = input.moveY;
+  const moveLen = Math.sqrt(moveX * moveX + moveY * moveY);
+  if (moveLen > 1) {
+    moveX /= moveLen;
+    moveY /= moveLen;
+  }
+  const hasInput = moveLen > 0.1;
 
-  if (forceX !== 0 || forceZ !== 0) {
-    body.applyImpulse({ x: forceX * dt, y: 0, z: forceZ * dt }, true);
+  // Simplified grounded check (low Y velocity = on ground)
+  const grounded = Math.abs(v.y) < 0.5;
+
+  // Direct velocity control - matches client (fish-flop.ts lines 251-258)
+  if (hasInput) {
+    const speed = grounded ? CUBE_MOVE_SPEED : CUBE_MOVE_SPEED * CUBE_AIR_CONTROL;
+    body.setLinvel({ x: moveX * speed, y: v.y, z: moveY * speed }, true);
+  } else if (grounded) {
+    // Instant stop when no input (preserve Y for gravity)
+    body.setLinvel({ x: 0, y: v.y, z: 0 }, true);
   }
 
   // Handle jump
-  if (input.spaceJustReleased) {
-    const vel = body.linvel();
-    // Only jump if roughly on ground (low Y velocity)
-    if (Math.abs(vel.y) < 2) {
-      body.applyImpulse({ x: 0, y: FLOP.JUMP_BASE_IMPULSE, z: 0 }, true);
-    }
+  if (input.spaceJustReleased && grounded) {
+    body.applyImpulse({ x: 0, y: FLOP.JUMP_BASE_IMPULSE, z: 0 }, true);
   }
 
-  // Clamp velocity
+  // Clamp velocity (safety)
   const vel = body.linvel();
   const horizSpeed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
   if (horizSpeed > FLOP.MAX_VELOCITY) {
