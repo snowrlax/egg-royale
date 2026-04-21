@@ -143,10 +143,11 @@ export function createLocalFish(
   const bodyRB = world.createRigidBody(bodyDesc);
 
   // Cuboid collider (0.5 half-extents = 1.0 unit cube)
+  // Collision groups: member of group 2 (players), collides with group 1 (ground) and 2 (players)
   const collDesc = RAPIER.ColliderDesc.cuboid(0.5, 0.5, 0.5)
     .setFriction(0.5)
     .setRestitution(0.1)
-    .setCollisionGroups(0x00020001);
+    .setCollisionGroups(0x00020003);
   world.createCollider(collDesc, bodyRB);
 
   return {

@@ -193,7 +193,7 @@ async function startGame(container: HTMLElement) {
         if (fs.id === result.playerId) continue;
         remoteFishes.set(
           fs.id,
-          createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture)
+          createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture, world)
         );
       }
 
@@ -205,9 +205,15 @@ async function startGame(container: HTMLElement) {
     },
 
     onDelta(delta: RoomDelta) {
+      // DEBUG: Log delta reception
+      if (delta.updatedFish.length > 0) {
+        console.log(`[delta] updatedFish=${delta.updatedFish.length}`);
+      }
       for (const fs of delta.updatedFish) {
         // Skip local player — no server correction
         if (fs.id === myPlayerId) continue;
+        // DEBUG: Log remote player positions
+        console.log(`[delta] remote ${fs.id.slice(-4)} pos=(${fs.body.pos[0].toFixed(1)}, ${fs.body.pos[1].toFixed(1)}, ${fs.body.pos[2].toFixed(1)})`);
 
         // Remote fish
         const existing = remoteFishes.get(fs.id);
@@ -217,7 +223,7 @@ async function startGame(container: HTMLElement) {
           // New player joined — create remote fish
           remoteFishes.set(
             fs.id,
-            createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture)
+            createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture, world)
           );
         }
       }
@@ -225,7 +231,7 @@ async function startGame(container: HTMLElement) {
       for (const removedId of delta.removedFishIds) {
         const remote = remoteFishes.get(removedId);
         if (remote) {
-          disposeRemoteFish(remote, gameScene.scene);
+          disposeRemoteFish(remote, gameScene.scene, world);
           remoteFishes.delete(removedId);
         }
       }
@@ -234,7 +240,7 @@ async function startGame(container: HTMLElement) {
     onPlayerLeft(playerId: string) {
       const remote = remoteFishes.get(playerId);
       if (remote) {
-        disposeRemoteFish(remote, gameScene.scene);
+        disposeRemoteFish(remote, gameScene.scene, world);
         remoteFishes.delete(playerId);
       }
     },
@@ -248,7 +254,7 @@ async function startGame(container: HTMLElement) {
         // Remove eliminated remote player from scene
         const remote = remoteFishes.get(playerId);
         if (remote) {
-          disposeRemoteFish(remote, gameScene.scene);
+          disposeRemoteFish(remote, gameScene.scene, world);
           remoteFishes.delete(playerId);
         }
       }

@@ -1,10 +1,11 @@
 /**
- * Visual-only remote fish — no Rapier physics.
+ * Remote fish with kinematic Rapier colliders for collision detection.
  * Receives FishState from server and interpolates between buffered states.
  * Renders 2 ticks behind (~66ms at 30Hz) for smooth motion.
  */
 
 import * as THREE from "three";
+import RAPIER from "@dimforge/rapier3d/rapier.js";
 import type { FishState, BodySnapshot } from "@fish-jam/shared";
 import { createFishMeshes, syncEyesToHead, type FishMeshes } from "./fish-flop.js";
 
@@ -22,23 +23,43 @@ export type RemoteFish = {
   id: string;
   color: string;
   meshes: FishMeshes;
+  body: RAPIER.RigidBody;      // Kinematic body for collision
+  collider: RAPIER.Collider;   // Collider attached to body
   stateBuffer: BufferedState[];
 };
 
 export function createRemoteFish(
   initialState: FishState,
   scene: THREE.Scene,
-  gradTex: THREE.DataTexture
+  gradTex: THREE.DataTexture,
+  world: RAPIER.World
 ): RemoteFish {
   const meshes = createFishMeshes(scene, gradTex, initialState.color);
 
   // Snap to initial position
   applyStateToMeshes(meshes, initialState);
 
+  // Create kinematic body (moved by code, not physics simulation)
+  const bodyDesc = RAPIER.RigidBodyDesc.kinematicPositionBased()
+    .setTranslation(
+      initialState.body.pos[0],
+      initialState.body.pos[1],
+      initialState.body.pos[2]
+    );
+  const body = world.createRigidBody(bodyDesc);
+
+  // Add collider (same size as local player cube: 0.5 half-extents)
+  // Collision groups: member of group 2 (players), collides with group 1 (ground) and 2 (players)
+  const colliderDesc = RAPIER.ColliderDesc.cuboid(0.5, 0.5, 0.5)
+    .setCollisionGroups(0x00020003);
+  const collider = world.createCollider(colliderDesc, body);
+
   return {
     id: initialState.id,
     color: initialState.color,
     meshes,
+    body,
+    collider,
     stateBuffer: [{ state: initialState, receivedAt: performance.now() }],
   };
 }
@@ -63,6 +84,7 @@ export function interpolateRemoteFish(
   // Only one state — snap directly
   if (buf.length === 1) {
     applyStateToMeshes(fish.meshes, buf[0].state);
+    syncKinematicBody(fish);
     return;
   }
 
@@ -72,6 +94,7 @@ export function interpolateRemoteFish(
   // If renderTime is before all entries, snap to oldest
   if (renderTime <= buf[0].receivedAt) {
     applyStateToMeshes(fish.meshes, buf[0].state);
+    syncKinematicBody(fish);
     return;
   }
 
@@ -88,6 +111,7 @@ export function interpolateRemoteFish(
 
   if (i0 === i1) {
     applyStateToMeshes(fish.meshes, buf[i0].state);
+    syncKinematicBody(fish);
     return;
   }
 
@@ -97,6 +121,7 @@ export function interpolateRemoteFish(
 
   if (span <= 0) {
     applyStateToMeshes(fish.meshes, buf[i1].state);
+    syncKinematicBody(fish);
     return;
   }
 
@@ -107,12 +132,19 @@ export function interpolateRemoteFish(
   lerpBodySnapshot(fish.meshes.bodyMesh, buf[i0].state.body, buf[i1].state.body, alpha);
   lerpBodySnapshot(fish.meshes.tailMesh, buf[i0].state.tail, buf[i1].state.tail, alpha);
   syncEyesToHead(fish.meshes.eyeL, fish.meshes.eyeR, fish.meshes.headMesh);
+  syncKinematicBody(fish);
 }
 
 export function disposeRemoteFish(
   fish: RemoteFish,
-  scene: THREE.Scene
+  scene: THREE.Scene,
+  world: RAPIER.World
 ): void {
+  // Clean up physics
+  world.removeCollider(fish.collider, true);
+  world.removeRigidBody(fish.body);
+
+  // Clean up meshes
   scene.remove(fish.meshes.headMesh);
   scene.remove(fish.meshes.bodyMesh);
   scene.remove(fish.meshes.tailMesh);
@@ -121,6 +153,18 @@ export function disposeRemoteFish(
 }
 
 // ── Internal helpers ──
+
+/**
+ * Sync kinematic body position to match the visual mesh.
+ * Must be called after every mesh update to keep collisions aligned.
+ */
+function syncKinematicBody(fish: RemoteFish): void {
+  fish.body.setNextKinematicTranslation({
+    x: fish.meshes.bodyMesh.position.x,
+    y: fish.meshes.bodyMesh.position.y,
+    z: fish.meshes.bodyMesh.position.z,
+  });
+}
 
 function applyStateToMeshes(meshes: FishMeshes, state: FishState): void {
   setMeshFromSnapshot(meshes.headMesh, state.head);
