@@ -11,7 +11,14 @@
       "WebFetch(domain:github.com)",
       "WebSearch",
       "Bash(curl -s -L \"https://rapier.rs/docs/user_guides/javascript/joints\")",
-      "WebFetch(domain:rapier.rs)"
+      "WebFetch(domain:rapier.rs)",
+      "WebFetch(domain:developer.valvesoftware.com)",
+      "WebFetch(domain:www.gabrielgambetta.com)",
+      "WebFetch(domain:docs.unity3d.com)",
+      "WebFetch(domain:trtc.io)",
+      "WebFetch(domain:lukestampfli.github.io)",
+      "Bash(cd:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }

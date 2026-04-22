@@ -19,8 +19,8 @@ import {
 
 export type SocketManagerCallbacks = {
   onJoined(result: JoinResult): void;
-  onSnapshot(snapshot: GameSnapshot): void;
-  onDelta(delta: RoomDelta): void;
+  onSnapshot(snapshot: GameSnapshot, serverTs: number, localReceiveTime: number): void;
+  onDelta(delta: RoomDelta, serverTs: number, localReceiveTime: number): void;
   onPlayerLeft(playerId: string): void;
   onPlayerEliminated(playerId: string): void;
   onRoundWinner(winnerId: string): void;
@@ -56,26 +56,28 @@ export function createSocketManager(
     });
 
     sock.on(serverEvents.snapshot, (raw: unknown) => {
+      const localReceiveTime = Date.now();
       try {
         const env = parseEnvelope(
           serverEvents.snapshot,
           gameSnapshotSchema,
           raw
         );
-        callbacks.onSnapshot(env.payload);
+        callbacks.onSnapshot(env.payload, env.ts, localReceiveTime);
       } catch (err) {
         console.error("[socket-manager] failed to parse snapshot", err);
       }
     });
 
     sock.on(serverEvents.delta, (raw: unknown) => {
+      const localReceiveTime = Date.now();
       try {
         const env = parseEnvelope(
           serverEvents.delta,
           roomDeltaSchema,
           raw
         );
-        callbacks.onDelta(env.payload);
+        callbacks.onDelta(env.payload, env.ts, localReceiveTime);
       } catch (err) {
         console.error("[socket-manager] failed to parse delta", err);
       }

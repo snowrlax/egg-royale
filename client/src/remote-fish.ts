@@ -1,23 +1,15 @@
 /**
  * Remote fish with kinematic Rapier colliders for collision detection.
- * Receives FishState from server and interpolates between buffered states.
- * Renders 2 ticks behind (~66ms at 30Hz) for smooth motion.
+ * Receives FishState from server and interpolates between tick-ordered states.
+ * Buffer size adapts to network conditions based on measured ping + jitter.
  */
 
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d/rapier.js";
 import type { FishState, BodySnapshot } from "@fish-jam/shared";
 import { createFishMeshes, syncEyesToHead, type FishMeshes } from "./fish-flop.js";
-
-const TICK_MS = 1000 / 30;
-const BUFFER_SIZE = 5;
-const RENDER_DELAY_TICKS = 2;
-const MAX_EXTRAPOLATION = 1.5;
-
-type BufferedState = {
-  state: FishState;
-  receivedAt: number;
-};
+import { createTickBuffer, type TickBuffer } from "./net/tick-buffer.js";
+import type { NetworkStats } from "./net/network-stats.js";
 
 export type RemoteFish = {
   id: string;
@@ -25,11 +17,13 @@ export type RemoteFish = {
   meshes: FishMeshes;
   body: RAPIER.RigidBody;      // Kinematic body for collision
   collider: RAPIER.Collider;   // Collider attached to body
-  stateBuffer: BufferedState[];
+  tickBuffer: TickBuffer;
+  lastServerTick: number;      // Track latest received tick for sync
 };
 
 export function createRemoteFish(
   initialState: FishState,
+  initialTick: number,
   scene: THREE.Scene,
   gradTex: THREE.DataTexture,
   world: RAPIER.World
@@ -54,91 +48,64 @@ export function createRemoteFish(
     .setCollisionGroups(0x00020003);
   const collider = world.createCollider(colliderDesc, body);
 
+  // Create tick buffer and insert initial state
+  const tickBuffer = createTickBuffer();
+  tickBuffer.insert(initialTick, initialState);
+
   return {
     id: initialState.id,
     color: initialState.color,
     meshes,
     body,
     collider,
-    stateBuffer: [{ state: initialState, receivedAt: performance.now() }],
+    tickBuffer,
+    lastServerTick: initialTick,
   };
 }
 
 export function updateRemoteFishState(
   fish: RemoteFish,
+  tick: number,
   newState: FishState
 ): void {
-  fish.stateBuffer.push({ state: newState, receivedAt: performance.now() });
-  if (fish.stateBuffer.length > BUFFER_SIZE) {
-    fish.stateBuffer.shift();
+  fish.tickBuffer.insert(tick, newState);
+  if (tick > fish.lastServerTick) {
+    fish.lastServerTick = tick;
   }
 }
 
 export function interpolateRemoteFish(
   fish: RemoteFish,
-  now: number
+  networkStats: NetworkStats
 ): void {
-  const buf = fish.stateBuffer;
-  if (buf.length === 0) return;
+  // Calculate render tick based on latest server tick minus buffer delay
+  const bufferDelay = networkStats.getTargetBufferTicks();
+  const renderTick = fish.lastServerTick - bufferDelay;
 
-  // Log drift detection: if mesh position differs significantly from latest server state
-  const latestPos = buf[buf.length - 1].state.body.pos;
-  const meshPos = fish.meshes.bodyMesh.position;
-  const drift = Math.abs(meshPos.x - latestPos[0]) + Math.abs(meshPos.z - latestPos[2]);
-  if (drift > 0.5) {
-    console.log(`[INTERP] ${fish.id.slice(-8)} drift=${drift.toFixed(1)}, bufLen=${buf.length}`);
+  const data = fish.tickBuffer.getInterpolationData(renderTick);
+  if (!data) {
+    // No data available - keep current position
+    return;
   }
 
-  // Only one state — snap directly
-  if (buf.length === 1) {
-    applyStateToMeshes(fish.meshes, buf[0].state);
+  // Warn on large gaps (potential packet loss)
+  if (data.gapTicks > 2) {
+    console.warn(
+      `[INTERP] ${fish.id.slice(-8)} gap=${data.gapTicks} ticks, extrapolating=${data.isExtrapolating}`
+    );
+  }
+
+  // If only one state or same state, snap directly
+  if (data.state0 === data.state1 || data.t === 0) {
+    applyStateToMeshes(fish.meshes, data.state0);
     syncKinematicBody(fish);
     return;
   }
 
-  // Render 2 ticks behind latest received time for smooth interpolation
-  const renderTime = now - TICK_MS * RENDER_DELAY_TICKS;
-
-  // If renderTime is before all entries, snap to oldest
-  if (renderTime <= buf[0].receivedAt) {
-    applyStateToMeshes(fish.meshes, buf[0].state);
-    syncKinematicBody(fish);
-    return;
-  }
-
-  // Find two states that bracket renderTime
-  let i0 = 0;
-  for (let i = 0; i < buf.length - 1; i++) {
-    if (buf[i + 1].receivedAt > renderTime) {
-      i0 = i;
-      break;
-    }
-    i0 = i;
-  }
-  const i1 = Math.min(i0 + 1, buf.length - 1);
-
-  if (i0 === i1) {
-    applyStateToMeshes(fish.meshes, buf[i0].state);
-    syncKinematicBody(fish);
-    return;
-  }
-
-  const t0 = buf[i0].receivedAt;
-  const t1 = buf[i1].receivedAt;
-  const span = t1 - t0;
-
-  if (span <= 0) {
-    applyStateToMeshes(fish.meshes, buf[i1].state);
-    syncKinematicBody(fish);
-    return;
-  }
-
-  // Allow slight extrapolation (up to 1.5x) but cap it
-  const alpha = Math.min((renderTime - t0) / span, MAX_EXTRAPOLATION);
-
-  lerpBodySnapshot(fish.meshes.headMesh, buf[i0].state.head, buf[i1].state.head, alpha);
-  lerpBodySnapshot(fish.meshes.bodyMesh, buf[i0].state.body, buf[i1].state.body, alpha);
-  lerpBodySnapshot(fish.meshes.tailMesh, buf[i0].state.tail, buf[i1].state.tail, alpha);
+  // Lerp position, slerp rotation
+  lerpBodySnapshot(fish.meshes.headMesh, data.state0.head, data.state1.head, data.t);
+  lerpBodySnapshot(fish.meshes.bodyMesh, data.state0.body, data.state1.body, data.t);
+  lerpBodySnapshot(fish.meshes.tailMesh, data.state0.tail, data.state1.tail, data.t);
   syncEyesToHead(fish.meshes.eyeL, fish.meshes.eyeR, fish.meshes.headMesh);
   syncKinematicBody(fish);
 }

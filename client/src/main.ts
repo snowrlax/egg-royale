@@ -27,6 +27,7 @@ import {
 } from "./remote-fish.js";
 import { createSocketManager } from "./net/socket-manager.js";
 import { createInputSender } from "./net/input-sender.js";
+import { createNetworkStats } from "./net/network-stats.js";
 
 const SERVER_URL = `http://${window.location.hostname}:3001`;
 
@@ -163,6 +164,7 @@ async function startGame(container: HTMLElement) {
   // ── Networking ──
   // Forward-declare inputSender so callbacks can reference it
   let inputSender: ReturnType<typeof createInputSender>;
+  const networkStats = createNetworkStats();
 
   const socketManager = createSocketManager({
     onJoined(result) {
@@ -196,18 +198,23 @@ async function startGame(container: HTMLElement) {
         if (fs.id === result.playerId) continue;
         remoteFishes.set(
           fs.id,
-          createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture, world)
+          createRemoteFish(fs, result.snapshot.tick, gameScene.scene, gameScene.gradientTexture, world)
         );
       }
 
       inputSender.start(result.roomId, result.playerId);
     },
 
-    onSnapshot(_snapshot: GameSnapshot) {
+    onSnapshot(_snapshot: GameSnapshot, serverTs: number, localReceiveTime: number) {
+      // Update network stats from server timestamp
+      networkStats.onServerMessage(serverTs, localReceiveTime);
       // Full state reset — used for server corrections
     },
 
-    onDelta(delta: RoomDelta) {
+    onDelta(delta: RoomDelta, serverTs: number, localReceiveTime: number) {
+      // Update network stats from server timestamp
+      networkStats.onServerMessage(serverTs, localReceiveTime);
+
       for (const fs of delta.updatedFish) {
         const isMe = fs.id === myPlayerId;
 
@@ -217,19 +224,13 @@ async function startGame(container: HTMLElement) {
         // Remote fish
         const existing = remoteFishes.get(fs.id);
         if (existing) {
-          // Only log remote fish position changes (reduces spam)
-          const oldPos = existing.stateBuffer[existing.stateBuffer.length - 1]?.state.body.pos;
-          const newPos = fs.body.pos;
-          if (!oldPos || Math.abs(newPos[0] - oldPos[0]) > 0.01 || Math.abs(newPos[2] - oldPos[2]) > 0.01) {
-            console.log(`[DELTA] remote ${fs.id.slice(-8)} moved to (${newPos[0].toFixed(1)}, ${newPos[2].toFixed(1)})`);
-          }
-          updateRemoteFishState(existing, fs);
+          updateRemoteFishState(existing, delta.tick, fs);
         } else {
           console.log(`[DELTA] creating NEW remote fish ${fs.id.slice(-8)}`);
           // New player joined — create remote fish
           remoteFishes.set(
             fs.id,
-            createRemoteFish(fs, gameScene.scene, gameScene.gradientTexture, world)
+            createRemoteFish(fs, delta.tick, gameScene.scene, gameScene.gradientTexture, world)
           );
         }
       }
@@ -404,10 +405,9 @@ async function startGame(container: HTMLElement) {
       gameScene.camera.lookAt(_camLookAt);
     }
 
-    // Interpolate remote fish
-    const now = performance.now();
+    // Interpolate remote fish using network-adaptive buffer
     for (const remote of remoteFishes.values()) {
-      interpolateRemoteFish(remote, now);
+      interpolateRemoteFish(remote, networkStats);
     }
 
     gameScene.renderer.render(gameScene.scene, gameScene.camera);
