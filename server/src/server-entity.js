@@ -62,9 +62,9 @@ export function applyInput(entity, input, dt, world) {
         // Instant stop when no input (preserve Y for gravity)
         body.setLinvel({ x: 0, y: v.y, z: 0 }, true);
     }
-    // Handle jump
+    // Handle jump - fixed impulse (no charging)
     if (input.spaceJustReleased && grounded) {
-        body.applyImpulse({ x: 0, y: FLOP.JUMP_BASE_IMPULSE, z: 0 }, true);
+        body.applyImpulse({ x: 0, y: FLOP.CUBE_JUMP_IMPULSE, z: 0 }, true);
     }
     // Clamp velocity (safety)
     const vel = body.linvel();

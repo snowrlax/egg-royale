@@ -77,10 +77,7 @@ export const FLOP = {
   CUBE_DAMPING: 5.0,           // Linear and angular damping
   CUBE_GROUNDED_RAY: 0.6,      // Raycast distance for ground check
   CUBE_GROUNDED_MARGIN: 0.1,   // Extra margin for ground detection
-  CUBE_JUMP_MIN_CHARGE: 0.05,
-  CUBE_JUMP_MAX_CHARGE: 0.5,
-  CUBE_JUMP_BASE: 6.0,
-  CUBE_JUMP_BONUS: 6.0,
+  CUBE_JUMP_IMPULSE: 9.0,      // Fixed jump impulse (no charging)
 
   // ── Sumo collision tuning ──
   PLAYER_MASS: 1.5,

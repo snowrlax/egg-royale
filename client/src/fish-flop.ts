@@ -253,33 +253,9 @@ export function updateLocalFish(
     fish.body.setLinvel({ x: 0, y: v.y, z: 0 }, true);
   }
 
-  // Jump charging state machine
-  if (fish.phase === "idle") {
-    // Start charging when space pressed while grounded
-    if (input.spaceDown && fish.grounded) {
-      fish.phase = "jump_charge";
-      fish.jumpCharge = 0;
-    }
-  } else if (fish.phase === "jump_charge") {
-    // Accumulate charge while space held
-    fish.jumpCharge = Math.min(fish.jumpCharge + dt, FLOP.CUBE_JUMP_MAX_CHARGE);
-
-    // Release jump on space release
-    if (input.spaceJustReleased) {
-      if (fish.jumpCharge >= FLOP.CUBE_JUMP_MIN_CHARGE && fish.grounded) {
-        const chargeRatio = fish.jumpCharge / FLOP.CUBE_JUMP_MAX_CHARGE;
-        const impulse = FLOP.CUBE_JUMP_BASE + chargeRatio * FLOP.CUBE_JUMP_BONUS;
-        fish.body.applyImpulse({ x: 0, y: impulse, z: 0 }, true);
-      }
-      fish.phase = "idle";
-      fish.jumpCharge = 0;
-    }
-
-    // Cancel charge if fell off platform
-    if (!fish.grounded) {
-      fish.phase = "idle";
-      fish.jumpCharge = 0;
-    }
+  // Fixed-impulse jump (no charging) - matches server exactly
+  if (input.spaceJustReleased && fish.grounded) {
+    fish.body.applyImpulse({ x: 0, y: FLOP.CUBE_JUMP_IMPULSE, z: 0 }, true);
   }
 }
 

@@ -28,8 +28,46 @@ import {
 import { createSocketManager } from "./net/socket-manager.js";
 import { createInputSender } from "./net/input-sender.js";
 import { createNetworkStats } from "./net/network-stats.js";
+import type { FishState } from "@fish-jam/shared";
 
 const SERVER_URL = `http://${window.location.hostname}:3001`;
+
+// ── Server Reconciliation Constants ──
+const SNAP_THRESHOLD = 2.0;   // Snap immediately if >2 units off
+const BLEND_FACTOR = 0.1;     // Gradual correction speed
+const TOLERANCE = 0.05;       // Ignore corrections smaller than this
+
+/**
+ * Reconcile local player position with server authoritative state.
+ * Uses snap for large errors, gradual blend for small drift.
+ */
+function reconcileLocalPlayer(
+  localFish: LocalFish,
+  serverState: FishState,
+  _world: RAPIER.World
+): void {
+  const body = localFish.body;
+  const serverPos = serverState.body.pos;
+  const clientPos = body.translation();
+
+  const dx = serverPos[0] - clientPos.x;
+  const dy = serverPos[1] - clientPos.y;
+  const dz = serverPos[2] - clientPos.z;
+  const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+  if (distance > SNAP_THRESHOLD) {
+    // Large error: snap immediately to server position
+    body.setTranslation({ x: serverPos[0], y: serverPos[1], z: serverPos[2] }, true);
+  } else if (distance > TOLERANCE) {
+    // Small error: blend toward server position
+    body.setTranslation({
+      x: clientPos.x + dx * BLEND_FACTOR,
+      y: clientPos.y + dy * BLEND_FACTOR,
+      z: clientPos.z + dz * BLEND_FACTOR,
+    }, true);
+  }
+  // else: within tolerance, no correction needed
+}
 
 async function boot() {
   const container = document.getElementById("app");
@@ -218,8 +256,11 @@ async function startGame(container: HTMLElement) {
       for (const fs of delta.updatedFish) {
         const isMe = fs.id === myPlayerId;
 
-        // Skip local player — no server correction
-        if (isMe) continue;
+        if (isMe && localFish) {
+          // Apply server correction to local player
+          reconcileLocalPlayer(localFish, fs, world);
+          continue;
+        }
 
         // Remote fish
         const existing = remoteFishes.get(fs.id);
